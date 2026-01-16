@@ -1,73 +1,224 @@
-/* THE PRODUCTION APPROACH
-   No "Hacking" required. Users use their normal portal login.
-*/
-
-// 1. CONSTANTS (From your RingLogix Partner Portal)
-const API_CONFIG = {
-    baseUrl: 'https://api.ringlogix.com/ns-api/v2', // Verify your regional API URL
-    clientId: 'YOUR_PARTNER_ID', 
-    clientSecret: 'YOUR_PARTNER_SECRET' 
-};
-
-// 2. THE LOGIN FUNCTION (Trades User/Pass for SIP Creds)
-async function loginAndGetSipDetails(username, password) {
-    try {
-        console.log("🔄 Authenticating...");
-
-        // Step A: Get Access Token (OAuth2)
-        // This confirms they are a real user and gets us a "Key" to ask for more info
-        const authResponse = await fetch(`${API_CONFIG.baseUrl}/oauth2/token`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-            body: new URLSearchParams({
-                'grant_type': 'password',
-                'client_id': API_CONFIG.clientId,
-                'client_secret': API_CONFIG.clientSecret,
-                'username': username,
-                'password': password
-            })
-        });
-
-        if (!authResponse.ok) throw new Error("Login Failed");
-        const tokens = await authResponse.json();
-        const accessToken = tokens.access_token;
-
-        // Step B: Get Device Details (The "Hidden" SIP Info)
-        // We ask the API: "What is the SIP password for this user's phone?"
-        const deviceResponse = await fetch(`${API_CONFIG.baseUrl}/domains/users/devices`, {
-            method: 'GET',
-            headers: { 'Authorization': `Bearer ${accessToken}` }
-        });
-
-        const devices = await deviceResponse.json();
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Zoho Power Dialer</title>
+    <script src="https://live.zwidgets.com/js-sdk/1.1/ZohoEmbededAppSDK.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/sip.js/0.21.2/sip.min.js"></script>
+    
+    <style>
+        :root { --primary: #007bff; --success: #28a745; --bg: #f8f9fa; }
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: var(--bg); padding: 20px; }
+        .card { background: white; padding: 25px; border-radius: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.05); max-width: 400px; margin: 0 auto; }
         
-        // We grab the first active device found for this user
-        const myDevice = devices.find(d => d.mac || d.sip_username); 
+        /* Layout utility */
+        .hidden { display: none !important; }
+        input { width: 100%; padding: 10px; margin: 10px 0; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box;}
+        button { width: 100%; padding: 12px; background: var(--primary); color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; }
+        button:hover { opacity: 0.9; }
+        
+        .status-bar { text-align: center; margin-bottom: 15px; font-size: 0.9em; color: #666; }
+        .led { display: inline-block; width: 10px; height: 10px; border-radius: 50%; background: #ccc; margin-right: 5px; }
+        .led.on { background: var(--success); }
+        
+        .lead-row { display: flex; justify-content: space-between; padding: 10px; border-bottom: 1px solid #eee; }
+        .lead-row.active { background: #e3f2fd; border-left: 4px solid var(--primary); }
+    </style>
+</head>
+<body>
 
-        return {
-            sipUri: `sip:${myDevice.sip_username}@${myDevice.domain}`,
-            sipPassword: myDevice.sip_password, // The Gold! 🏆
-            websocketUrl: `wss://${myDevice.domain}:8089` // Or standard RingLogix WSS
+    <div id="login-screen" class="card">
+        <h2 style="text-align:center;">🔌 Connect Phone</h2>
+        <div id="login-error" style="color:red; font-size:0.8em; text-align:center;"></div>
+        <input type="text" id="rl-username" placeholder="RingLogix Username (user@domain)">
+        <input type="password" id="rl-password" placeholder="Password">
+        <button onclick="handleLogin()">Login & Initialize</button>
+    </div>
+
+    <div id="dialer-screen" class="card hidden">
+        <div class="status-bar"><span id="sip-led" class="led"></span> <span id="sip-status">Connecting...</span></div>
+        
+        <div id="leads-list">
+            </div>
+
+        <div style="margin-top:20px; display:flex; gap:10px;">
+            <button onclick="startPowerDialer()" style="background:var(--success)">Start Dialing</button>
+            <button onclick="stopPowerDialer()" style="background:#dc3545">Stop</button>
+        </div>
+        
+        <div style="margin-top:10px;">
+            <input type="text" id="manual-dial" placeholder="Or enter number manually...">
+            <button onclick="manualCall()" style="background:#6c757d; margin-top:0;">Call</button>
+        </div>
+    </div>
+
+<script>
+    /* =========================================
+       CONFIGURATION (EDIT THIS)
+       ========================================= */
+    const CONFIG = {
+        apiBase: 'https://api.ringlogix.com/ns-api/v2', // Verify your API URL
+        clientId: '0-t41691-c291565-r291528',         // <-- PASTE HERE
+        clientSecret: '55a79be2d94ea966646819f1ec1ef8f2'  // <-- PASTE HERE
+    };
+
+    let userAgent; // The SIP Phone Object
+    let isDialing = false;
+
+    // Zoho Mock Data (Replace with ZOHO.CRM.API later)
+    const leads = [
+        { Name: 'Bartow Industries', Phone: '17705550101' },
+        { Name: 'Cartersville Paving', Phone: '17705550102' }
+    ];
+
+    /* =========================================
+       PART 1: AUTHENTICATION & DISCOVERY
+       ========================================= */
+    async function handleLogin() {
+        const user = document.getElementById('rl-username').value;
+        const pass = document.getElementById('rl-password').value;
+        const btn = document.querySelector('button');
+        const err = document.getElementById('login-error');
+        
+        btn.innerText = "Authenticating...";
+        err.innerText = "";
+
+        try {
+            // A. GET TOKEN
+            const tokenParams = new URLSearchParams({
+                'grant_type': 'password',
+                'client_id': CONFIG.clientId,
+                'client_secret': CONFIG.clientSecret,
+                'username': user,
+                'password': pass
+            });
+
+            const authRes = await fetch(`${CONFIG.apiBase}/oauth2/token`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                body: tokenParams
+            });
+
+            if (!authRes.ok) throw new Error("Invalid Credentials");
+            const authData = await authRes.json();
+            
+            // B. DISCOVER SIP DETAILS
+            // We use the token to find the user's "Phone" device
+            const devicesRes = await fetch(`${CONFIG.apiBase}/domains/users/phones`, {
+                method: 'GET',
+                headers: { 'Authorization': `Bearer ${authData.access_token}` }
+            });
+            
+            const devices = await devicesRes.json();
+            // Find the first device that has SIP credentials
+            const phone = devices.find(d => d.sip_username && d.sip_password);
+            
+            if (!phone) throw new Error("No SIP Phone found for this user.");
+
+            // C. SUCCESS - SWITCH UI
+            console.log("SIP Credentials Found:", phone.sip_username);
+            initializeSoftphone(phone.sip_username, phone.sip_password, phone.domain);
+            
+            document.getElementById('login-screen').classList.add('hidden');
+            document.getElementById('dialer-screen').classList.remove('hidden');
+            renderLeads();
+
+        } catch (e) {
+            console.error(e);
+            err.innerText = e.message;
+            btn.innerText = "Login & Initialize";
+        }
+    }
+
+    /* =========================================
+       PART 2: SIP.JS (THE SOFTPHONE)
+       ========================================= */
+    function initializeSoftphone(sipUser, sipPass, domain) {
+        const transportOptions = {
+            server: `wss://${domain}:8089` // Standard NetSapiens WSS port
         };
 
-    } catch (error) {
-        console.error("Auth Error:", error);
-        alert("Login failed. Check console.");
-        return null;
+        const uri = SIP.UserAgent.makeURI(`sip:${sipUser}@${domain}`);
+        
+        userAgent = new SIP.UserAgent({
+            uri: uri,
+            transportOptions: transportOptions,
+            authorizationUsername: sipUser,
+            authorizationPassword: sipPass,
+            delegate: {
+                onConnect: () => {
+                    document.getElementById('sip-led').classList.add('on');
+                    document.getElementById('sip-status').innerText = "Phone Ready";
+                },
+                onDisconnect: (error) => {
+                    document.getElementById('sip-led').classList.remove('on');
+                    document.getElementById('sip-status').innerText = "Disconnected";
+                }
+            }
+        });
+
+        userAgent.start();
     }
-}
 
-// 3. USAGE (Connects to the UI)
-async function handleLoginBtnClick() {
-    const user = document.getElementById('username_input').value;
-    const pass = document.getElementById('password_input').value;
-
-    const sipConfig = await loginAndGetSipDetails(user, pass);
-
-    if (sipConfig) {
-        // Pass these dynamic creds into your generic SIP.js function
-        initializeSoftphone(sipConfig); 
-        document.getElementById('login-screen').style.display = 'none';
-        document.getElementById('dialer-screen').style.display = 'block';
+    /* =========================================
+       PART 3: DIALER LOGIC
+       ========================================= */
+    function renderLeads() {
+        const list = document.getElementById('leads-list');
+        list.innerHTML = leads.map((l, i) => 
+            `<div class="lead-row" id="row-${i}">
+                <span>${l.Name}</span>
+                <small>${l.Phone}</small>
+             </div>`
+        ).join('');
     }
-}
+
+    async function startPowerDialer() {
+        isDialing = true;
+        for (let i = 0; i < leads.length; i++) {
+            if (!isDialing) break;
+            
+            // Highlight Row
+            document.querySelectorAll('.lead-row').forEach(r => r.classList.remove('active'));
+            document.getElementById(`row-${i}`).classList.add('active');
+            
+            await placeCall(leads[i].Phone);
+            
+            // Wait 5 seconds between calls (Mock "Wrap Up" time)
+            await new Promise(r => setTimeout(r, 5000));
+        }
+    }
+
+    function stopPowerDialer() { isDialing = false; }
+
+    async function manualCall() {
+        const num = document.getElementById('manual-dial').value;
+        if(num) placeCall(num);
+    }
+
+    function placeCall(number) {
+        return new Promise((resolve) => {
+            console.log("Dialing:", number);
+            document.getElementById('sip-status').innerText = `Dialing ${number}...`;
+            
+            const target = SIP.UserAgent.makeURI(`sip:${number}@${userAgent.configuration.uri.host}`);
+            const inviter = new SIP.Inviter(userAgent, target);
+            
+            // Handle Call Events
+            inviter.stateChange.addListener((state) => {
+                console.log("Call State:", state);
+                if (state === SIP.SessionState.Terminated) {
+                    document.getElementById('sip-status').innerText = "Call Ended";
+                    resolve(); // Move to next lead
+                }
+            });
+
+            inviter.invite();
+        });
+    }
+
+    // Initialize Zoho SDK
+    ZOHO.embeddedApp.init();
+</script>
+</body>
+</html>
