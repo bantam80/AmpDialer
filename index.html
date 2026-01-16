@@ -26,7 +26,7 @@
     <div id="login-screen" class="card">
         <h2 style="text-align:center;">🔌 Connect Phone</h2>
         <div id="login-error" style="color:red; font-size:0.8em; text-align:center;"></div>
-        <input type="text" id="rl-username" placeholder="RingLogix Username (user@domain)">
+        <input type="text" id="rl-username" placeholder="RingLogix Username (user@domain.com)">
         <input type="password" id="rl-password" placeholder="Password">
         <button onclick="handleLogin()">Login & Initialize</button>
     </div>
@@ -53,9 +53,11 @@
        CONFIGURATION
        ========================================= */
     const CONFIG = {
-        // Point this to your new Render URL
+        // Points to your Python Proxy on Render
         authProxyUrl: 'https://ampdialer.onrender.com/auth/login', 
-        // This is still needed for the DEVICE lookup
+        
+        // Points to your specific PBX cluster for data lookup
+        // Note: This MUST include the /v2 suffix for the frontend
         apiBase: 'https://pbx.simplelogin.net/ns-api/v2' 
     };
 
@@ -69,10 +71,10 @@
     ];
 
     /* =========================================
-       PART 1: AUTHENTICATION (VIA PROXY)
+       PART 1: AUTHENTICATION & DISCOVERY
        ========================================= */
     async function handleLogin() {
-        const user = document.getElementById('rl-username').value;
+        const fullUsername = document.getElementById('rl-username').value.trim();
         const pass = document.getElementById('rl-password').value;
         const btn = document.querySelector('button');
         const err = document.getElementById('login-error');
@@ -80,24 +82,50 @@
         btn.innerText = "Authenticating...";
         err.innerText = "";
 
+        // 1. EXTRACT DOMAIN AND USER
+        if (!fullUsername.includes('@')) {
+            err.innerText = "Please use full format: user@domain.com";
+            btn.innerText = "Login & Initialize";
+            return;
+        }
+        const [userPart, domainPart] = fullUsername.split('@');
+
         try {
             // A. GET TOKEN (Call YOUR Proxy)
+            console.log("Step A: Requesting Token...");
             const authRes = await fetch(CONFIG.authProxyUrl, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ username: user, password: pass })
+                body: JSON.stringify({ username: fullUsername, password: pass })
             });
 
             if (!authRes.ok) throw new Error("Login failed. Check credentials.");
             const authData = await authRes.json();
             
-            // B. DISCOVER SIP DETAILS
-            const devicesRes = await fetch(`${CONFIG.apiBase}/domains/users/phones`, {
-                method: 'GET',
-                headers: { 'Authorization': `Bearer ${authData.access_token}` }
-            });
+            // B. DISCOVER SIP DETAILS (Explicit URL)
+            console.log("Step B: Looking up Phone...");
+            const explicitUrl = `${CONFIG.apiBase}/domains/${domainPart}/users/${userPart}/phones`;
             
-            const devices = await devicesRes.json();
+            const devicesRes = await fetch(explicitUrl, {
+                method: 'GET',
+                headers: { 
+                    'Authorization': `Bearer ${authData.access_token}` 
+                }
+            });
+
+            if (!devicesRes.ok) {
+                console.error("API Error:", devicesRes.status);
+                throw new Error(`Phone Lookup Failed (${devicesRes.status})`);
+            }
+            
+            let devices = await devicesRes.json();
+            
+            // SAFETY CHECK: Handle Single Object vs Array response
+            if (!Array.isArray(devices)) {
+                console.log("API returned single object, wrapping in array.");
+                devices = [devices];
+            }
+
             const phone = devices.find(d => d.sip_username && d.sip_password);
             
             if (!phone) throw new Error("No SIP Phone found for this user.");
