@@ -104,7 +104,7 @@
             
             // B. DISCOVER SIP DETAILS (Explicit URL)
             console.log("Step B: Looking up Phone...");
-            const explicitUrl = `${CONFIG.apiBase}/domains/${domainPart}/users/${userPart}/phones`;
+            const explicitUrl = `${CONFIG.apiBase}/domains/${domainPart}/users/${userPart}/devices`;
             
             const devicesRes = await fetch(explicitUrl, {
                 method: 'GET',
