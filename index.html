@@ -109,19 +109,32 @@
         const sipUriInput = document.getElementById("sipUri").value.trim();
         const password = document.getElementById("sipPassword").value.trim();
 
+        // 1. Validation: Ensure all fields are present
         if (!serverAddress || !sipUriInput || !password) {
-            log("❌ Error: Please fill in Server, Login ID and Password.");
+            log("❌ Error: Please fill in Server, Login ID, and Password.");
             return;
         }
 
-        // Handle URI formatting (user typed '101@domain', we need 'sip:101@domain')
+        // 2. Validation: Ensure Login ID contains '@' (Extension@Domain)
+        if (!sipUriInput.includes("@")) {
+            log("❌ Error: Login ID must include domain (e.g., 101@291565).");
+            return;
+        }
+
+        // 3. Format the URI (Ensure it starts with 'sip:')
         let fullUri = sipUriInput.startsWith("sip:") ? sipUriInput : `sip:${sipUriInput}`;
         
-        // 1. Construct Dynamic WebSocket URL
+        // 4. Parse the URI object for SIP.js
+        const targetURI = SIP.UserAgent.makeURI(fullUri);
+        if (!targetURI) {
+            log("❌ Error: Could not parse Login ID. Check format.");
+            return;
+        }
+
         const wsServerURL = `wss://${serverAddress}`;
         log(`🔗 Connecting to ${wsServerURL} as ${fullUri}...`);
 
-        // 2. Configure SIP User Agent
+        // 5. Configure SIP User Agent
         const transportOptions = {
             server: wsServerURL
         };
@@ -129,8 +142,8 @@
         userAgent = new SIP.UserAgent({
             transportConstructor: SIP.WebSocketTransport,
             transportOptions: transportOptions,
-            uri: SIP.UserAgent.makeURI(fullUri),
-            authorizationUsername: fullUri.split("@")[0].replace("sip:", ""), // Extract extension
+            uri: targetURI, // Explicitly set the URI we parsed above
+            authorizationUsername: targetURI.user, // Use the '101' part as auth user
             authorizationPassword: password,
             delegate: {
                 onConnect: () => {
@@ -138,7 +151,8 @@
                 },
                 onDisconnect: (error) => {
                     log("❌ WebSocket Disconnected" + (error ? ": " + error : ""));
-                    resetUI();
+                    // Do not reset UI immediately on errors to allow reading logs
+                    if(error) console.error(error);
                 },
                 onInvite: (invitation) => {
                     handleIncomingCall(invitation);
@@ -146,10 +160,10 @@
             }
         });
 
-        // 3. Start & Register
+        // 6. Start & Register
         try {
             await userAgent.start();
-            // Create Registerer
+            
             const registerer = new SIP.Registerer(userAgent);
             
             // Setup Registration Listeners
@@ -158,6 +172,8 @@
                     case SIP.RegistererState.Registered:
                         log("✅ DEVICE REGISTERED! READY TO CALL.");
                         btnConnect.innerText = "Connected";
+                        btnConnect.classList.remove("btn-primary");
+                        btnConnect.classList.add("btn-success");
                         btnConnect.disabled = true;
                         btnDial.disabled = false;
                         break;
@@ -177,7 +193,6 @@
             console.error(error);
         }
     }
-
     // --- Step 2: Outbound Call ---
     async function makeCall() {
         const dest = document.getElementById("destNumber").value.trim();
