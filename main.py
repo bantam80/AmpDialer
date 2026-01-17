@@ -1,45 +1,48 @@
 import os
 import requests
-from fastapi import FastAPI, HTTPException, Body
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 app = FastAPI()
 
-# 1. ALLOW CORS (So Zoho can talk to this)
+# 1. ALLOW CORS (So your browser can talk to this backend)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # In production, change this to your GitHub Pages URL
+    allow_origins=["*"],  # For production, you might restrict this later
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# 2. CONFIG FROM ENV VARS (Secure Storage)
-CLIENT_ID = os.getenv("RL_CLIENT_ID")
-CLIENT_SECRET = os.getenv("RL_CLIENT_SECRET")
-# Base URL for RingLogix/NetSapiens (Check your specific regional URL)
-NS_API_BASE = os.getenv("NS_API_BASE", "https://api.ringlogix.com/ns-api/v2")
-
+# 2. DATA MODEL (Expects JSON from the frontend)
 class LoginRequest(BaseModel):
     username: str
     password: str
 
-@app.get("/")
-def health_check():
-    return {"status": "Proxy is running 🚀"}
+# 3. ENVIRONMENT VARIABLES (From Render Settings)
+CLIENT_ID = os.getenv("RL_CLIENT_ID")
+CLIENT_SECRET = os.getenv("RL_CLIENT_SECRET")
+# Ensure this is https://pbx.simplelogin.net/ns-api (No /v2)
+NS_API_BASE = os.getenv("NS_API_BASE", "https://pbx.simplelogin.net/ns-api")
 
+# --- ROUTES ---
+
+# SERVE THE UI
+@app.get("/")
+async def read_root():
+    return FileResponse('index.html')
+
+# PROXY THE LOGIN
 @app.post("/auth/login")
-def proxy_login(creds: LoginRequest):
-    """
-    Takes User/Pass from Frontend.
-    Adds Client ID/Secret.
-    Returns Access Token from RingLogix.
-    """
+async def login_proxy(creds: LoginRequest):
     if not CLIENT_ID or not CLIENT_SECRET:
         raise HTTPException(status_code=500, detail="Server misconfiguration: Missing Secrets")
 
-    # Prepare the official OAuth2 Payload
+    # The NetSapiens Token URL
+    token_url = f"{NS_API_BASE}/oauth2/token"
+
     payload = {
         "grant_type": "password",
         "client_id": CLIENT_ID,
@@ -49,15 +52,11 @@ def proxy_login(creds: LoginRequest):
     }
 
     try:
-        # Forward request to NetSapiens
-        response = requests.post(f"{NS_API_BASE}/oauth2/token", data=payload)
-        
-        # If upstream failed (wrong password, etc.), return the error
-        if not response.ok:
-            raise HTTPException(status_code=response.status_code, detail=response.text)
-
-        # Return the clean Token JSON to the frontend
+        response = requests.post(token_url, data=payload)
+        response.raise_for_status()
         return response.json()
-
+    except requests.exceptions.HTTPError as e:
+        # Pass the exact error from RingLogix back to the UI
+        raise HTTPException(status_code=response.status_code, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
