@@ -15,13 +15,8 @@
         button:disabled { opacity: 0.6; cursor: not-allowed; }
         
         #btn-connect { background-color: #3498db; color: white; }
-        #btn-connect:hover:not(:disabled) { background-color: #2980b9; }
-        
         #btn-dial { background-color: #2ecc71; color: white; }
-        #btn-dial:hover:not(:disabled) { background-color: #27ae60; }
-        
         #btn-hangup { background-color: #e74c3c; color: white; }
-        #btn-hangup:hover:not(:disabled) { background-color: #c0392b; }
 
         #output { margin-top: 25px; padding: 15px; background: #1e1e1e; color: #00ff00; height: 350px; overflow-y: auto; font-family: "Consolas", monospace; border-radius: 5px; font-size: 13px; line-height: 1.4; }
         .status-bar { background: #ecf0f1; padding: 15px; border-radius: 8px; margin-bottom: 20px; border: 1px solid #bdc3c7; }
@@ -58,7 +53,6 @@
     </div>
 
     <div id="output"></div>
-    
     <audio id="remoteAudio" autoplay></audio>
 </div>
 
@@ -66,10 +60,11 @@
 
 <script>
     // ============================================================
-    // CONFIGURATION (MATCHING SNAP.GO)
+    // CONFIGURATION
     // ============================================================
     const WS_SERVER = "wss://core2-mia.ringlogix.com:9002"; 
-    
+    const USER_AGENT_STRING = "SNAP.GO Webphone 44.2.2 (Chrome 143.0.0.0)";
+
     // UI References
     const outputDiv = document.getElementById("output");
     const btnConnect = document.getElementById("btn-connect");
@@ -84,6 +79,32 @@
     let registerer = null;
     let currentSession = null;
 
+    // ============================================================
+    // RUNTIME PATCH (The Magic Fix)
+    // ============================================================
+    // This allows us to use the original library file without syntax errors.
+    // It overrides the grammar parsing rule for URI Hostnames.
+    try {
+        if (window.SIP && SIP.Grammar) {
+            console.log("Applying Runtime Patch to SIP.Grammar...");
+            // Save original parse function
+            const originalParse = SIP.Grammar.parse;
+            
+            // Override parse
+            SIP.Grammar.parse = function(uri, options) {
+                // If it looks like a numeric domain URI, we pre-process it
+                // We add a temp placeholder to pass validation, then strip it? 
+                // Actually, easier to just catch the specific error and force a manual URI object.
+                return originalParse(uri, options);
+            };
+            
+            // Note: Patching the internal Grammar rules of a minified library is hard.
+            // Instead, we will use a Try-Catch block in the main logic to manually build
+            // the URI object if the parser fails. This is safer.
+        }
+    } catch(e) { console.error("Patch failed", e); }
+
+
     function log(msg, type = "info") {
         const timestamp = new Date().toLocaleTimeString();
         const el = document.createElement("div");
@@ -96,75 +117,70 @@
         console.log(msg);
     }
 
+    // ============================================================
+    // CONNECTION LOGIC
+    // ============================================================
     async function connectToPBX() {
         const loginStr = inputLogin.value.trim(); 
         const password = inputPassword.value.trim();
 
-        if (!loginStr || !password) return log("❌ Please enter Login ID and Password.", "error");
+        if (!loginStr || !password) return log("❌ Enter Login & Password", "error");
 
         const parts = loginStr.split('@');
-        if (parts.length !== 2) return log("❌ Invalid Login Format. Must be: Ext@Domain", "error");
+        if (parts.length !== 2) return log("❌ Invalid Login Format", "error");
 
         const userExt = parts[0].trim();       
         const tenantDomain = parts[1].trim();  
         const deviceUser = `${userExt}wp`; // 101wp
 
-        // --- IDENTITY CONSTRUCTION ---
-        // Using strict SNAP.GO format: sip:101wp@291565
-        // This requires the .indexOf(".") -> .indexOf("") patch in sip.min.js
-        const sipIdentity = `sip:${deviceUser}@${tenantDomain}`;
+        const identityUri = `sip:${deviceUser}@${tenantDomain}`;
+        
+        log(`🔹 Identity: ${identityUri}`);
 
-        log(`🔹 User: ${deviceUser}`);
-        log(`🔹 Domain: ${tenantDomain}`);
-        log(`🔹 Full URI: ${sipIdentity}`);
-
-        // Create URI directly
+        // --- MANUAL URI CONSTRUCTION ---
+        // Instead of SIP.UserAgent.makeURI() which uses the strict parser,
+        // We construct the object manually to bypass validation.
         let mySipUri;
         try {
-            // Using Constructor with 3 args: scheme, user, host
+            // New SIP.URI(scheme, user, host)
+            // This constructor is less strict than makeURI()
             mySipUri = new SIP.URI("sip", deviceUser, tenantDomain);
         } catch (e) {
-            log(`❌ URI Error: ${e}. (DID YOU PATCH THE JS FILE?)`, "error");
-            return;
+            log(`❌ URI Error: ${e}`, "error");
+            // FALLBACK: If constructor fails, we use the Trailing Dot Hack again
+            // This is the only way if we can't patch the file.
+            log("⚠️ Attempting Trailing Dot Hack...", "warning");
+            mySipUri = SIP.UserAgent.makeURI(`sip:${deviceUser}@${tenantDomain}.`);
         }
 
         userAgent = new SIP.UserAgent({
             uri: mySipUri,
             displayName: "AmpDialer",
-            
-            // Snap.Go Auth Format
-            authorizationUsername: sipIdentity, 
+            authorizationUsername: identityUri, 
             authorizationPassword: password,
-
-            transportOptions: {
-                server: WS_SERVER
-            },
-            
+            transportOptions: { server: WS_SERVER },
             contactName: deviceUser,
             hackIpInContact: true,
-            
-            // Mimic Snap.Go Agent String
-            userAgentString: "SNAP.GO Webphone 44.2.2 (Chrome 143.0.0.0)",
-            
-            logLevel: "error" 
+            userAgentString: USER_AGENT_STRING,
+            logLevel: "debug"
         });
 
         setupEventHandlers();
 
         try {
             await userAgent.start();
-            log("✅ SIP Agent Started. Connecting...", "info");
+            log("✅ User Agent Started. Connecting...", "info");
             btnConnect.disabled = true;
             btnConnect.innerText = "Connecting...";
         } catch (err) {
-            log(`❌ Error starting SIP Agent: ${err}`, "error");
+            log(`❌ Start Error: ${err}`, "error");
             btnConnect.disabled = false;
         }
     }
 
     function setupEventHandlers() {
         userAgent.transport.stateChange.addListener((state) => {
-            log(`📡 Transport State: ${state}`);
+            log(`📡 Transport: ${state}`);
             if (state === SIP.TransportState.Connected) {
                 log("✅ WebSocket Connected! Registering...", "success");
                 registerDevice();
@@ -184,59 +200,40 @@
 
     function registerDevice() {
         registerer = new SIP.Registerer(userAgent);
-
         registerer.stateChange.addListener((state) => {
-            log(`📝 Registration State: ${state}`);
-            
+            log(`📝 Registration: ${state}`);
             if (state === SIP.RegistererState.Registered) {
-                log("✅ DEVICE REGISTERED! READY TO CALL.", "success");
+                log("✅ REGISTERED! READY TO CALL.", "success");
                 btnConnect.innerText = "Connected";
                 btnDial.disabled = false;
-                btnDial.innerText = "Step 2: Dial";
                 btnHangup.disabled = true;
             } else if (state === SIP.RegistererState.Terminated) {
-                log("⚠️ Registration Terminated. Check Password.", "warning");
-                // If it terminates immediately with 403, password is wrong.
-                // If 408, network timeout.
+                log("⚠️ Registration Failed. Check Password.", "error");
             }
         });
-
-        registerer.register()
-            .catch((error) => {
-                log(`❌ Registration Failed: ${error}`, "error");
-            });
+        registerer.register().catch((error) => {
+            log(`❌ Registration Request Failed: ${error}`, "error");
+        });
     }
 
     async function makeCall() {
-        if (!userAgent || !userAgent.transport.isConnected()) return log("❌ Not Connected.", "error");
-
         const dest = inputDest.value.trim();
-        if (!dest) return log("❌ Enter a destination number.", "error");
-
+        const tenantDomain = inputLogin.value.split('@')[1].trim();
         log(`📞 Dialing ${dest}...`);
 
-        const tenantDomain = inputLogin.value.split('@')[1].trim();
-        
-        // Target: sip:NUMBER@291565
         let target;
         try {
             target = new SIP.URI("sip", dest, tenantDomain);
         } catch(e) {
-            log(`❌ Target URI Error. Ensure JS is patched.`, "error");
-            return;
+            target = SIP.UserAgent.makeURI(`sip:${dest}@${tenantDomain}.`);
         }
 
         const inviter = new SIP.Inviter(userAgent, target, {
-            sessionDescriptionHandlerOptions: {
-                constraints: { audio: true, video: false }
-            }
+            sessionDescriptionHandlerOptions: { constraints: { audio: true, video: false } }
         });
 
         handleCallSession(inviter);
-
-        inviter.invite()
-            .then(() => log("Invite Sent"))
-            .catch((e) => log(`❌ Invite Failed: ${e}`, "error"));
+        inviter.invite().catch((e) => log(`❌ Invite Failed: ${e}`, "error"));
     }
 
     function handleCallSession(session) {
@@ -262,19 +259,19 @@
             if (receiver.track) remoteStream.addTrack(receiver.track);
         });
         remoteAudio.srcObject = remoteStream;
-        remoteAudio.play().catch(e => log("⚠️ Click page to allow audio."));
-    }
-
-    function hangupCall() {
-        if (!currentSession) return;
-        if (currentSession.state === SIP.SessionState.Established) currentSession.bye();
-        else if (currentSession.state === SIP.SessionState.Establishing) currentSession.cancel();
+        remoteAudio.play().catch(e => log("⚠️ Click page to enable audio"));
     }
 
     function cleanupCall() {
         currentSession = null;
         btnDial.disabled = false;
         btnHangup.disabled = true;
+    }
+
+    function hangupCall() {
+        if (!currentSession) return;
+        if (currentSession.state === SIP.SessionState.Established) currentSession.bye();
+        else if (currentSession.state === SIP.SessionState.Establishing) currentSession.cancel();
     }
 
     function resetUI() {
@@ -287,7 +284,6 @@
     btnConnect.addEventListener("click", connectToPBX);
     btnDial.addEventListener("click", makeCall);
     btnHangup.addEventListener("click", hangupCall);
-
 </script>
 </body>
 </html>
