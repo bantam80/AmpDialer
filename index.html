@@ -70,7 +70,7 @@
     ];
 
     /* =========================================
-       PART 1: AUTHENTICATION
+       PART 1: AUTHENTICATION (Debug Mode)
        ========================================= */
     async function handleLogin() {
         const fullUsername = document.getElementById('rl-username').value.trim();
@@ -81,7 +81,6 @@
         btn.innerText = "Authenticating...";
         err.innerText = "";
 
-        // 1. Validate Input
         if (!fullUsername.includes('@')) {
             err.innerText = "Please use full format: user@domain.com";
             btn.innerText = "Login & Initialize";
@@ -90,7 +89,7 @@
         const [userPart, domainPart] = fullUsername.split('@');
 
         try {
-            // A. GET TOKEN (Verifies credentials)
+            // A. GET TOKEN
             console.log("Step A: Requesting Token...");
             const authRes = await fetch(CONFIG.authProxyUrl, {
                 method: 'POST',
@@ -101,8 +100,7 @@
             if (!authRes.ok) throw new Error("Login failed. Check credentials.");
             const authData = await authRes.json();
             
-            // B. DISCOVER DEVICE (Find the SIP Username)
-            // We use the "Explicit URL" to avoid 401 errors
+            // B. DISCOVER DEVICE
             console.log("Step B: Looking up Devices...");
             const explicitUrl = `${CONFIG.apiBase}/domains/${domainPart}/users/${userPart}/devices`;
             
@@ -114,18 +112,16 @@
             if (!devicesRes.ok) throw new Error(`Phone Lookup Failed (${devicesRes.status})`);
             
             let devices = await devicesRes.json();
-            
-            // Safety Check: Ensure we have an array
-            if (!Array.isArray(devices)) {
-                console.log("API returned single object, wrapping in array.");
-                devices = [devices];
-            }
+            if (!Array.isArray(devices)) devices = [devices];
 
-            // C. SELECT THE CORRECT DEVICE
-            // Priority 1: Find the 'WebPhone' device (usually ends in 'wp')
-            // Priority 2: Use the first available device
+            // 🔍 DEBUG: Print the exact structure the API is returning
+            console.log("--- DEBUG: RAW DEVICE DATA ---");
+            console.log(JSON.stringify(devices, null, 2)); 
+            console.log("------------------------------");
+
+            // C. SELECT DEVICE
+            // We prioritize 'wp' but take anything available
             let targetDevice = devices.find(d => d.device && d.device.includes('wp@'));
-            
             if (!targetDevice) {
                 console.log("'wp' device not found, using first available device.");
                 targetDevice = devices[0];
@@ -133,20 +129,22 @@
 
             if (!targetDevice) throw new Error("No SIP devices found for this user.");
 
-            // D. PARSE SIP USERNAME
-            // Sometimes it's in 'sip_username', sometimes hidden in the 'device' URI
-            let sipUser = targetDevice.sip_username || targetDevice.username;
-            
+            // D. PARSE USERNAME (Updated to check more fields)
+            // We check every possible variation of "username"
+            let sipUser = targetDevice.sip_username || 
+                          targetDevice.username || 
+                          targetDevice.aor || 
+                          targetDevice.subscriber_name;
+
+            // Fallback: Parse from 'device' string (e.g. sip:101wp@domain)
             if (!sipUser && targetDevice.device) {
-                // Regex to extract '101wp' from 'sip:101wp@domain.com'
                 const match = targetDevice.device.match(/sip:(.*?)@/);
                 if (match) sipUser = match[1];
             }
-            
-            if (!sipUser) throw new Error("Could not determine SIP Username.");
+
+            if (!sipUser) throw new Error("Could not determine SIP Username. Check Console Logs.");
 
             // E. INITIALIZE
-            // We use the parsed SIP Username + the Input Password (Shared Password)
             console.log(`Initializing SIP with User: ${sipUser} @ ${domainPart}`);
             initializeSoftphone(sipUser, pass, domainPart);
             
