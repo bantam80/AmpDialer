@@ -3,185 +3,209 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AmpDialer - Zoho Widget</title>
+    <title>AmpDialer - Amplifire Console</title>
     <style>
-        body { font-family: sans-serif; padding: 15px; background-color: #fff; color: #333; font-size: 14px; }
-        .container { max-width: 400px; margin: 0 auto; border: 1px solid #ddd; padding: 15px; border-radius: 8px; }
-        h3 { margin-top: 0; color: #e67e22; border-bottom: 2px solid #e67e22; padding-bottom: 5px; }
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; padding: 20px; background-color: #f8f9fa; color: #333; }
+        .container { max-width: 450px; margin: 0 auto; background: white; padding: 25px; border-radius: 12px; box-shadow: 0 10px 25px rgba(0,0,0,0.05); border: 1px solid #e1e4e8; }
+        h2 { margin-top: 0; color: #e67e22; font-size: 1.4em; display: flex; align-items: center; gap: 10px; }
         
-        .status-box { background: #000; color: #0f0; padding: 10px; border-radius: 4px; font-family: monospace; height: 120px; overflow-y: auto; margin-bottom: 15px; font-size: 12px; }
+        .status-box { background: #1a1a1a; color: #00ff41; padding: 12px; border-radius: 6px; font-family: "SFMono-Regular", Consolas, monospace; height: 140px; overflow-y: auto; margin-bottom: 20px; font-size: 12px; line-height: 1.5; border: 1px solid #333; }
+        .log-entry { margin-bottom: 4px; border-left: 2px solid #333; padding-left: 8px; }
         
-        .control-group { margin-bottom: 10px; }
-        label { display: block; font-weight: bold; margin-bottom: 3px; font-size: 12px; }
-        input { width: 100%; padding: 8px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; }
+        .input-group { margin-bottom: 15px; }
+        label { display: block; margin-bottom: 6px; font-weight: 600; color: #4a5568; font-size: 0.85em; text-transform: uppercase; letter-spacing: 0.025em; }
+        input { width: 100%; padding: 12px; box-sizing: border-box; border: 1px solid #cbd5e0; border-radius: 6px; font-size: 15px; transition: border-color 0.2s; }
+        input:focus { outline: none; border-color: #3498db; box-shadow: 0 0 0 3px rgba(52,152,219,0.1); }
         
-        .btn-row { display: flex; gap: 8px; margin-top: 15px; }
-        button { flex: 1; padding: 10px; border: none; border-radius: 4px; font-weight: bold; cursor: pointer; color: white; }
+        .controls { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 20px; }
+        button { padding: 12px; cursor: pointer; border: none; border-radius: 6px; font-size: 14px; font-weight: 700; transition: all 0.2s; color: white; text-transform: uppercase; }
         
-        .btn-connect { background-color: #3498db; }
+        .btn-connect { background-color: #3498db; grid-column: span 2; }
+        .btn-connect:hover { background-color: #2980b9; }
+        
         .btn-dial { background-color: #2ecc71; }
-        .btn-hangup { background-color: #e74c3c; }
-        .btn-answer { background-color: #f1c40f; color: #000; display: none; }
+        .btn-dial:hover { background-color: #27ae60; }
         
-        button:disabled { background-color: #bdc3c7; cursor: not-allowed; }
-        .hidden { display: none; }
+        .btn-hangup { background-color: #e74c3c; }
+        .btn-hangup:hover { background-color: #c0392b; }
+
+        .btn-answer { background-color: #f39c12; grid-column: span 2; display: none; animation: pulse 1.5s infinite; }
+        @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.7; } 100% { opacity: 1; } }
+
+        button:disabled { background-color: #edf2f7; color: #a0aec0; cursor: not-allowed; }
     </style>
     <script src="sip-0.21.2.min.js"></script>
 </head>
 <body>
 
 <div class="container">
-    <h3>AmpDialer</h3>
+    <h2>AmpDialer <span>📞</span></h2>
     
-    <div id="log" class="status-box">Ready to connect...</div>
+    <div id="status-log" class="status-box">Ready for session...</div>
 
-    <div class="control-group">
-        <label>Destination Number</label>
-        <input type="text" id="destNumber" placeholder="e.g. 17705551212">
+    <div class="input-group">
+        <label for="destNumber">Destination Number</label>
+        <input type="text" id="destNumber" placeholder="Enter number (e.g. 17705551212)">
     </div>
 
-    <div class="btn-row">
-        <button id="btnConnect" class="btn-connect">Connect</button>
-        <button id="btnDial" class="btn-dial" disabled>Dial</button>
+    <div class="controls">
+        <button id="btnConnect" class="btn-connect">Step 1: Go Online</button>
+        <button id="btnDial" class="btn-dial" disabled>Step 2: Dial</button>
         <button id="btnHangup" class="btn-hangup" disabled>Hangup</button>
+        <button id="btnAnswer" class="btn-answer">Incoming Call: Answer</button>
     </div>
-    
-    <button id="btnAnswer" class="btn-answer">📞 Answer Incoming Call</button>
 
     <audio id="remoteAudio" autoplay></audio>
 </div>
 
 <script>
-    // --- VERIFIED DATA (Source of Truth) ---
-    const CONFIG = {
+    // --- SOURCE OF TRUTH CONFIGURATION ---
+    const VALIDATED_CONFIG = {
         server: "core2-mia.ringlogix.com:9002",
         domain: "291565",
         extension: "101wp", 
-        sipPassword: "vYHJ9izVcP381d3n", // Extracted from device 'authentication_key'
-        userAgent: "SNAP.GO Webphone 44.2.2 (Chrome 143.0.0.0)"
+        authKey: "vYHJ9izVcP381d3n",
+        userAgentString: "SNAP.GO Webphone 44.2.2 (Chrome 143.0.0.0)"
     };
 
-    const logEl = document.getElementById("log");
+    const logEl = document.getElementById("status-log");
     const btnConnect = document.getElementById("btnConnect");
     const btnDial = document.getElementById("btnDial");
     const btnHangup = document.getElementById("btnHangup");
     const btnAnswer = document.getElementById("btnAnswer");
     const remoteAudio = document.getElementById("remoteAudio");
 
-    let ua;
-    let session;
+    let userAgent;
+    let currentSession;
 
     function log(msg) {
-        const time = new Date().toLocaleTimeString();
-        logEl.innerHTML += `<div>[${time}] ${msg}</div>`;
+        const time = new Date().toLocaleTimeString([], { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
+        logEl.innerHTML += `<div class="log-entry">[${time}] ${msg}</div>`;
         logEl.scrollTop = logEl.scrollHeight;
+        console.log(`[AmpDialer] ${msg}`);
     }
 
-    // Handle Global Errors
-    window.onerror = (m) => log("❌ JS Error: " + m);
+    // --- INITIALIZE & REGISTER ---
+    async function connectToPBX() {
+        log("🔄 Starting Secure Handshake...");
 
-    async function initPhone() {
-        log("🔄 Starting Connection...");
-        
-        const sipUri = `sip:${CONFIG.extension}@${CONFIG.domain}`;
-        
-        ua = new SIP.UserAgent({
+        const sipUriStr = `sip:${VALIDATED_CONFIG.extension}@${VALIDATED_CONFIG.domain}`;
+        const targetURI = SIP.UserAgent.makeURI(sipUriStr);
+
+        if (!targetURI) {
+            log("❌ FAILED: URI Parsing Error. Check numeric domain.");
+            return;
+        }
+
+        userAgent = new SIP.UserAgent({
             transportConstructor: SIP.WebSocketTransport,
-            transportOptions: { server: `wss://${CONFIG.server}` },
-            uri: SIP.UserAgent.makeURI(sipUri),
-            // SOURCE OF TRUTH: Corrected Auth Format
-            authorizationUsername: `sip:${CONFIG.extension}@${CONFIG.domain}`,
-            authorizationPassword: CONFIG.sipPassword,
-            userAgentString: CONFIG.userAgent,
+            transportOptions: { server: `wss://${VALIDATED_CONFIG.server}` },
+            uri: targetURI,
+            // Matches literal 'username' field in working SNAP.GO trace
+            authorizationUsername: `sip:${VALIDATED_CONFIG.extension}@${VALIDATED_CONFIG.domain}`,
+            authorizationPassword: VALIDATED_CONFIG.authKey,
+            userAgentString: VALIDATED_CONFIG.userAgentString,
             delegate: {
-                onConnect: () => log("🔗 WebSocket Connected!"),
-                onInvite: (invitation) => handleInvite(invitation)
+                onConnect: () => log("🔗 WebSocket: CONNECTED"),
+                onInvite: (invitation) => handleIncoming(invitation)
             }
         });
 
         try {
-            await ua.start();
+            await userAgent.start();
             
-            // SOURCE OF TRUTH: Registrar domain must be numeric
-            const registerer = new SIP.Registerer(ua, {
-                registrar: SIP.UserAgent.makeURI(`sip:${CONFIG.domain}`)
-            });
+            // Matches 'REGISTER sip:291565' from working trace
+            const registrarURI = SIP.UserAgent.makeURI(`sip:${VALIDATED_CONFIG.domain}`);
+            const registerer = new SIP.Registerer(userAgent, { registrar: registrarURI });
 
             registerer.stateChange.addListener((state) => {
                 if (state === SIP.RegistererState.Registered) {
-                    log("✅ REGISTERED & READY");
-                    btnConnect.disabled = true;
+                    log("✅ DEVICE REGISTERED. DIALER READY.");
                     btnConnect.innerText = "Online";
+                    btnConnect.disabled = true;
                     btnDial.disabled = false;
-                } else if (state === SIP.RegistererState.Terminated) {
-                    log("❌ Registration Failed");
+                } else if (state === SIP.RegistererState.Unregistered) {
+                    log("⚠️ Registration Lost.");
                 }
             });
 
             await registerer.register();
-
         } catch (e) {
-            log("❌ Init Error: " + e.message);
+            log("❌ REGISTRATION ERROR: " + e.message);
         }
     }
 
+    // --- OUTBOUND CALL ---
     async function makeCall() {
-        const num = document.getElementById("destNumber").value.trim();
-        if (!num) return log("⚠️ Enter number");
+        const dest = document.getElementById("destNumber").value.trim();
+        if (!dest) return log("⚠️ Please enter a number.");
 
-        log(`📞 Calling ${num}...`);
-        const target = SIP.UserAgent.makeURI(`sip:${num}@${CONFIG.domain}`);
+        log(`📞 Dialing: ${dest}`);
+        const target = SIP.UserAgent.makeURI(`sip:${dest}@${VALIDATED_CONFIG.domain}`);
+        const inviter = new SIP.Inviter(userAgent, target);
         
-        const inviter = new SIP.Inviter(ua, target);
-        handleSession(inviter);
-        
+        setupSessionListeners(inviter);
         await inviter.invite({
             sessionDescriptionHandlerOptions: { constraints: { audio: true, video: false } }
         });
     }
 
-    function handleInvite(invitation) {
-        log("🔔 Incoming Call!");
+    // --- INCOMING CALL ---
+    function handleIncoming(invitation) {
+        log(`🔔 INCOMING: ${invitation.remoteIdentity.uri.user}`);
         btnAnswer.style.display = "block";
-        btnAnswer.onclick = () => {
-            invitation.accept();
-            handleSession(invitation);
-            btnAnswer.style.display = "none";
-        };
-    }
-
-    function handleSession(s) {
-        session = s;
-        btnHangup.disabled = false;
         btnDial.disabled = true;
 
-        session.stateChange.addListener((state) => {
-            log(`ℹ️ State: ${state}`);
-            if (state === SIP.SessionState.Established) {
-                log("🗣️ Connected!");
-                const remoteStream = new MediaStream();
-                session.sessionDescriptionHandler.peerConnection.getReceivers().forEach(r => {
-                    if (r.track) remoteStream.addTrack(r.track);
-                });
-                remoteAudio.srcObject = remoteStream;
-            } 
+        btnAnswer.onclick = () => {
+            log("✅ Answering...");
+            invitation.accept();
+            setupSessionListeners(invitation);
+            btnAnswer.style.display = "none";
+        };
+
+        invitation.stateChange.addListener((state) => {
             if (state === SIP.SessionState.Terminated) {
-                log("⏹️ Call Ended");
-                btnHangup.disabled = true;
+                btnAnswer.style.display = "none";
                 btnDial.disabled = false;
-                session = null;
+                log("⏹️ Incoming Call Cancelled.");
             }
         });
     }
 
-    function endCall() {
-        if (!session) return;
-        session.state === SIP.SessionState.Established ? session.bye() : session.cancel();
+    // --- SESSION MANAGEMENT ---
+    function setupSessionListeners(session) {
+        currentSession = session;
+        btnHangup.disabled = false;
+        btnDial.disabled = true;
+
+        session.stateChange.addListener((state) => {
+            log(`ℹ️ Session: ${state}`);
+            
+            if (state === SIP.SessionState.Established) {
+                log("🗣️ CONNECTED: Audio Active.");
+                const remoteStream = new MediaStream();
+                session.sessionDescriptionHandler.peerConnection.getReceivers().forEach((receiver) => {
+                    if (receiver.track) remoteStream.addTrack(receiver.track);
+                });
+                remoteAudio.srcObject = remoteStream;
+            } 
+            else if (state === SIP.SessionState.Terminated) {
+                log("⏹️ CALL ENDED.");
+                currentSession = null;
+                btnHangup.disabled = true;
+                btnDial.disabled = false;
+            }
+        });
     }
 
-    btnConnect.onclick = initPhone;
-    btnDial.onclick = makeCall;
-    btnHangup.onclick = endCall;
+    function hangup() {
+        if (!currentSession) return;
+        currentSession.state === SIP.SessionState.Established ? currentSession.bye() : currentSession.cancel();
+    }
+
+    btnConnect.addEventListener("click", connectToPBX);
+    btnDial.addEventListener("click", makeCall);
+    btnHangup.addEventListener("click", hangup);
 </script>
 </body>
 </html>
