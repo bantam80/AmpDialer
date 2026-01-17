@@ -160,8 +160,8 @@
         const pbxHost = new URL(CONFIG.apiBase).hostname;
 
         const transportOptions = {
-            // 👇 CHANGE THIS: Use Port 443 (Standard HTTPS)
-            server: `wss://${pbxHost}:443` 
+            // 👇 CORRECT PORT FOUND: 9002
+            server: `wss://${pbxHost}:9002` 
         };
 
         console.log(`🔌 Connecting to WebSocket: ${transportOptions.server}`);
@@ -173,7 +173,7 @@
             transportOptions: transportOptions,
             authorizationUsername: sipUser,
             authorizationPassword: sipPass,
-            // Add a keepalive to prevent timeouts
+            // Keepalive ensures the connection stays open
             hackViaTcp: true, 
             delegate: {
                 onConnect: () => {
@@ -185,11 +185,6 @@
                     console.warn("❌ SIP Disconnected:", error);
                     document.getElementById('sip-led').classList.remove('on');
                     document.getElementById('sip-status').innerText = "Disconnected";
-                    
-                    // Optional: Retry logic could go here
-                    if (error && error.code === 1006) {
-                         document.getElementById('sip-status').innerText = "Connection Blocked (Firewall?)";
-                    }
                 }
             }
         });
