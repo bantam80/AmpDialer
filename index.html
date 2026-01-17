@@ -4,14 +4,8 @@
     <meta charset="UTF-8">
     <title>Zoho Power Dialer</title>
     
-    <script src="https://unpkg.com/sip.js@0.21.2/dist/sip.min.js"></script>
+    <script src="sip-0.21.2.min.js"></script>
     
-    <script>
-        if (typeof SIP === 'undefined') {
-            document.write('<script src="https://cdn.jsdelivr.net/npm/sip.js@0.21.2/dist/sip.min.js"><\/script>');
-        }
-    </script>
-
     <script src="https://live.zwidgets.com/js-sdk/1.1/ZohoEmbededAppSDK.min.js"></script>
     
     <style>
@@ -61,10 +55,7 @@
        CONFIGURATION
        ========================================= */
     const CONFIG = {
-        // Full URL for Render Backend
         authProxyUrl: 'https://ampdialer.onrender.com/auth/login', 
-        
-        // NetSapiens API
         apiBase: 'https://pbx.simplelogin.net/ns-api/v2' 
     };
 
@@ -81,9 +72,9 @@
        PART 1: AUTHENTICATION
        ========================================= */
     async function handleLogin() {
-        // CHECK IF LIBRARY LOADED
+        // Double check library loaded
         if (typeof SIP === 'undefined') {
-            alert("Error: SIP.js library failed to load. Please check your firewall/ad-blocker.");
+            alert("Error: SIP.js library not loaded. Check filename in index.html");
             return;
         }
 
@@ -128,7 +119,8 @@
             let devices = await devicesRes.json();
             if (!Array.isArray(devices)) devices = [devices];
 
-            // C. FIND MATCHING DEVICE (Using the key we discovered in your logs)
+            // C. FIND MATCHING DEVICE
+            // Finds the device with the hidden system password
             let targetDevice = devices.find(d => d['device-sip-registration-password']);
             
             if (!targetDevice) {
