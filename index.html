@@ -92,10 +92,10 @@
     }
 
     // ============================================================
-    // STEP 1: DYNAMIC CONNECTION (THE FIX)
+    // STEP 1: DYNAMIC CONNECTION (FIXED)
     // ============================================================
     async function connectToPBX() {
-        const loginStr = inputLogin.value.trim(); // e.g., "101@291565"
+        const loginStr = inputLogin.value.trim(); 
         const password = inputPassword.value.trim();
 
         if (!loginStr || !password) {
@@ -103,51 +103,59 @@
             return;
         }
 
-        // --- DYNAMIC LOGIC START ---
-        // 1. Parse "101@291565"
+        // 1. CLEAN & PARSE
         const parts = loginStr.split('@');
         if (parts.length !== 2) {
-            log("❌ Invalid Login Format. Must be: Ext@Domain (e.g., 101@291565)", "error");
+            log("❌ Invalid Login Format. Must be: Ext@Domain", "error");
             return;
         }
 
-        const userExt = parts[0];       // "101"
-        const tenantDomain = parts[1];  // "291565"
+        // AGGRESSIVE TRIMMING (Fixes "Failed to create URI" caused by spaces)
+        const userExt = parts[0].trim();       
+        const tenantDomain = parts[1].trim();  
         
-        // 2. Add 'wp' suffix for the WebPhone device ID
-        const deviceUser = `${userExt}wp`; // "101wp"
+        // 2. CONSTRUCT IDENTITY
+        const deviceUser = `${userExt}wp`; // Adds "wp" suffix
+        
+        log(`🔹 Parsing: User='${userExt}', Domain='${tenantDomain}'`);
 
-        log(`🔹 User Ext: ${userExt}`);
-        log(`🔹 Domain: ${tenantDomain}`);
-        log(`🔹 Device Identity: ${deviceUser}`);
+        // 3. GENERATE URI (With Error Catching)
+        // We try the Tenant Domain first (e.g. 291565)
+        let uriString = `sip:${deviceUser}@${tenantDomain}`;
+        let mySipUri = SIP.UserAgent.makeURI(uriString);
 
-        // 3. Create the SIP URI using the Tenant Domain
-        // This fixes the "403 Forbidden" by matching the server's expected tenant.
-        const mySipUri = SIP.UserAgent.makeURI(`sip:${deviceUser}@${tenantDomain}`);
+        // Fallback: If parser rejects "291565", try the main domain
+        if (!mySipUri) {
+            log(`⚠️ Parser rejected '${uriString}'. Trying fallback domain...`, "error");
+            uriString = `sip:${deviceUser}@ringlogix.com`; // Fallback
+            mySipUri = SIP.UserAgent.makeURI(uriString);
+        }
 
         if (!mySipUri) {
-            log("❌ Failed to create valid SIP URI.", "error");
+            log(`❌ CRITICAL: Could not generate URI from '${uriString}'`, "error");
             return;
         }
-        // --- DYNAMIC LOGIC END ---
 
-        log(`🚀 Initializing SIP Agent for: ${mySipUri.toString()}`);
+        log(`🚀 Identity Created: ${mySipUri.toString()}`);
 
+        // 4. CONFIGURATION
         userAgent = new SIP.UserAgent({
             uri: mySipUri,
             displayName: "Hammer Console",
             
-            // Auth using the "wp" username
+            // Credentials
             authorizationUsername: deviceUser, 
             authorizationPassword: password,
 
+            // Server
             transportOptions: {
                 server: WS_SERVER
             },
             
-            register: true, // Register so we can receive calls too
+            register: true, 
             contactName: deviceUser,
-            logLevel: "error" // Keep console clean, change to "log" for debug
+            // Debug Mode: see exactly why SIP.js might be unhappy in the browser console
+            logLevel: "debug" 
         });
 
         setupEventHandlers();
