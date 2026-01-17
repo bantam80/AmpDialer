@@ -110,15 +110,8 @@
             return;
         }
 
-        // --- INTERNAL URI (For SIP.js Validation Only) ---
-        // We use the Server Address here so SIP.js thinks it's valid
-        const internalUri = `sip:${ext}@${server}`;
-        const targetURI = SIP.UserAgent.makeURI(internalUri);
-        
-        // --- REAL IDENTITY (For The PBX) ---
-        // We will force these into the headers manually later
-        const realIdentity = `sip:${ext}@${domain}`;
-
+        // Initialize with the SERVER address (which SIP.js likes)
+        const targetURI = SIP.UserAgent.makeURI(`sip:${ext}@${server}`);
         const wsServerURL = `wss://${server}`;
         log(`🔗 Connecting to ${wsServerURL}...`);
 
@@ -126,7 +119,7 @@
             transportConstructor: SIP.WebSocketTransport,
             transportOptions: { server: wsServerURL },
             uri: targetURI,
-            authorizationUsername: `${ext}@${domain}`, // Valid Auth User
+            authorizationUsername: `${ext}@${domain}`,
             authorizationPassword: password,
             delegate: {
                 onConnect: () => log("✅ WebSocket Connected! Registering..."),
@@ -138,27 +131,32 @@
             }
         });
 
+        // ---------------------------------------------------------
+        // 🔥 THE INTERCEPTOR: Force-fix the Numeric Domain 🔥
+        // ---------------------------------------------------------
+        // This Monkey-Patches the send function to swap headers at the last millisecond
+        const originalSend = userAgent.transport.send;
+        userAgent.transport.send = function(message) {
+            // Define what we want to replace
+            // We want to turn "sip:101@core2-mia..." into "sip:101@291565"
+            const wrongUri = `sip:${ext}@${server}`;
+            const rightUri = `sip:${ext}@${domain}`;
+            
+            // Perform global replacement in the message string
+            let newMessage = message.replaceAll(wrongUri, rightUri);
+            
+            // Log it so we know it worked
+            if (message !== newMessage) {
+                console.log(`⚡ [Interceptor] Swapped URI: ${wrongUri} -> ${rightUri}`);
+            }
+
+            return originalSend.apply(this, [newMessage]);
+        };
+        // ---------------------------------------------------------
+
         try {
             await userAgent.start();
-            
             const registerer = new SIP.Registerer(userAgent);
-
-            // --- HEADER OVERRIDE HACK ---
-            // This forces the To/From headers to use your Numeric Domain (291565)
-            // Bypassing SIP.js strict validation
-            const registerOptions = {
-                requestDelegate: {
-                    onSend: (request) => {
-                        // Keep the existing Tag, just swap the URI
-                        let currentFrom = request.message.getHeader('From');
-                        let tag = currentFrom.split(';tag=')[1]; 
-                        
-                        log(`🛠️ Overwriting Headers to: ${realIdentity}`);
-                        request.message.setHeader('To', `<${realIdentity}>`);
-                        request.message.setHeader('From', `<${realIdentity}>;tag=${tag}`);
-                    }
-                }
-            };
             
             registerer.stateChange.addListener((newState) => {
                 switch (newState) {
@@ -179,9 +177,7 @@
                 }
             });
 
-            // Pass our options with the header hack
-            await registerer.register(registerOptions);
-
+            await registerer.register();
         } catch (error) {
             log("❌ Connection Failed: " + error);
         }
@@ -191,30 +187,17 @@
         const dest = document.getElementById("destNumber").value.trim();
         if (!dest || !userAgent) return;
 
-        // Use the SERVER domain for target URI to ensure parsing succeeds
-        // The PBX usually routes this correctly if it's just a number
         const target = SIP.UserAgent.makeURI(`sip:${dest}@${userAgent.configuration.uri.host}`);
         log(`📞 Dialing ${dest}...`);
 
         const inviter = new SIP.Inviter(userAgent, target);
         
-        // Apply the same Header Hack to Invites so Outbound calls work too
-        const ext = document.getElementById("sipExt").value.trim();
-        const domain = document.getElementById("sipDomain").value.trim();
-        const realIdentity = `sip:${ext}@${domain}`;
-
-        const inviteOptions = {
-            sessionDescriptionHandlerOptions: { constraints: { audio: true, video: false } },
-            requestDelegate: {
-                onSend: (request) => {
-                     let currentFrom = request.message.getHeader('From');
-                     let tag = currentFrom.split(';tag=')[1];
-                     request.message.setHeader('From', `<${realIdentity}>;tag=${tag}`);
-                }
-            }
+        // Options (Audio Only)
+        const options = {
+            sessionDescriptionHandlerOptions: { constraints: { audio: true, video: false } }
         };
 
-        await inviter.invite(inviteOptions);
+        await inviter.invite(options);
         handleCallSession(inviter);
     }
 
