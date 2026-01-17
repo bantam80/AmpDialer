@@ -156,13 +156,15 @@
        PART 2: SIP.JS (THE SOFTPHONE)
        ========================================= */
     function initializeSoftphone(sipUser, sipPass, domain) {
-        // Extract Hostname (pbx.simplelogin.net)
+        // Extract Hostname (e.g., pbx.simplelogin.net)
         const pbxHost = new URL(CONFIG.apiBase).hostname;
 
         const transportOptions = {
-            // 👇 FIX: Use Port 443 (Standard HTTPS/WSS port) instead of 8089
+            // 👇 CHANGE THIS: Use Port 443 (Standard HTTPS)
             server: `wss://${pbxHost}:443` 
         };
+
+        console.log(`🔌 Connecting to WebSocket: ${transportOptions.server}`);
 
         const uri = SIP.UserAgent.makeURI(`sip:${sipUser}@${domain}`);
         
@@ -171,16 +173,23 @@
             transportOptions: transportOptions,
             authorizationUsername: sipUser,
             authorizationPassword: sipPass,
+            // Add a keepalive to prevent timeouts
+            hackViaTcp: true, 
             delegate: {
                 onConnect: () => {
-                    console.log("SIP Connected!");
+                    console.log("✅ SIP Connected!");
                     document.getElementById('sip-led').classList.add('on');
                     document.getElementById('sip-status').innerText = "Phone Ready";
                 },
                 onDisconnect: (error) => {
-                    console.log("SIP Disconnected:", error);
+                    console.warn("❌ SIP Disconnected:", error);
                     document.getElementById('sip-led').classList.remove('on');
                     document.getElementById('sip-status').innerText = "Disconnected";
+                    
+                    // Optional: Retry logic could go here
+                    if (error && error.code === 1006) {
+                         document.getElementById('sip-status').innerText = "Connection Blocked (Firewall?)";
+                    }
                 }
             }
         });
