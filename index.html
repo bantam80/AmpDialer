@@ -110,8 +110,13 @@
             return;
         }
 
-        // Initialize with the SERVER address (which SIP.js likes)
-        const targetURI = SIP.UserAgent.makeURI(`sip:${ext}@${server}`);
+        // --- DEFINITIONS ---
+        // Internal URI: What SIP.js *thinks* it's using (Safe: has .com)
+        const safeUri = `sip:${ext}@${server}`;
+        // External URI: What the PBX *actually* requires (Unsafe: numeric)
+        const realUri = `sip:${ext}@${domain}`;
+
+        const targetURI = SIP.UserAgent.makeURI(safeUri);
         const wsServerURL = `wss://${server}`;
         log(`🔗 Connecting to ${wsServerURL}...`);
 
@@ -119,7 +124,7 @@
             transportConstructor: SIP.WebSocketTransport,
             transportOptions: { server: wsServerURL },
             uri: targetURI,
-            authorizationUsername: `${ext}@${domain}`,
+            authorizationUsername: `${ext}@${domain}`, // Valid Auth User
             authorizationPassword: password,
             delegate: {
                 onConnect: () => log("✅ WebSocket Connected! Registering..."),
@@ -131,31 +136,47 @@
             }
         });
 
-        // ---------------------------------------------------------
-        // 🔥 THE INTERCEPTOR: Force-fix the Numeric Domain 🔥
-        // ---------------------------------------------------------
-        // This Monkey-Patches the send function to swap headers at the last millisecond
+        // =========================================================
+        // 🛡️ THE DOUBLE AGENT INTERCEPTOR 🛡️
+        // =========================================================
+        
+        // 1. OUTGOING Interceptor (Send to Network)
+        // SIP.js gives us "safeUri", we swap it to "realUri" for the PBX.
         const originalSend = userAgent.transport.send;
         userAgent.transport.send = function(message) {
-            // Define what we want to replace
-            // We want to turn "sip:101@core2-mia..." into "sip:101@291565"
-            const wrongUri = `sip:${ext}@${server}`;
-            const rightUri = `sip:${ext}@${domain}`;
-            
-            // Perform global replacement in the message string
-            let newMessage = message.replaceAll(wrongUri, rightUri);
-            
-            // Log it so we know it worked
+            let newMessage = message.replaceAll(safeUri, realUri);
             if (message !== newMessage) {
-                console.log(`⚡ [Interceptor] Swapped URI: ${wrongUri} -> ${rightUri}`);
+                console.log(`⚡ [OUT] Swapped Safe URI -> Real URI`);
             }
-
             return originalSend.apply(this, [newMessage]);
         };
-        // ---------------------------------------------------------
+
+        // 2. INCOMING Interceptor (Receive from Network)
+        // PBX gives us "realUri", we swap it back to "safeUri" so SIP.js doesn't crash.
+        const originalOnMessage = userAgent.transport.onMessage;
+        userAgent.transport.onMessage = function(msg) {
+            let data = msg;
+            // Handle cases where msg might be an event object vs raw string
+            if (typeof msg === 'object' && msg.data) {
+                 data = msg.data;
+            }
+            
+            // Only swap the specific URI to avoid breaking Auth Nonces/Realms
+            // We use replaceAll on the string data
+            let newData = data.replaceAll(realUri, safeUri);
+            
+            if (data !== newData) {
+                console.log(`⚡ [IN] Swapped Real URI -> Safe URI (Prevented Crash)`);
+            }
+            
+            // Call original with the sanitized data
+            return originalOnMessage.call(this, newData);
+        };
+        // =========================================================
 
         try {
             await userAgent.start();
+            
             const registerer = new SIP.Registerer(userAgent);
             
             registerer.stateChange.addListener((newState) => {
@@ -187,12 +208,11 @@
         const dest = document.getElementById("destNumber").value.trim();
         if (!dest || !userAgent) return;
 
+        // Use the SAFE internal domain for logic
         const target = SIP.UserAgent.makeURI(`sip:${dest}@${userAgent.configuration.uri.host}`);
         log(`📞 Dialing ${dest}...`);
 
         const inviter = new SIP.Inviter(userAgent, target);
-        
-        // Options (Audio Only)
         const options = {
             sessionDescriptionHandlerOptions: { constraints: { audio: true, video: false } }
         };
