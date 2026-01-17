@@ -60,6 +60,41 @@
 
 <script>
     // ============================================================
+    // 🛠️ RUNTIME PARSER PATCH (THE FIX)
+    // ============================================================
+    // This wrapper tricks the SIP.js parser into accepting "291565"
+    // by temporarily changing it to "291565.com" during validation.
+    if (window.SIP && SIP.Grammar) {
+        console.log("Applying Runtime Patch to SIP.Grammar...");
+        const originalParse = SIP.Grammar.parse;
+        
+        SIP.Grammar.parse = function(input, startRule) {
+            try {
+                // Try standard parsing first
+                return originalParse(input, startRule);
+            } catch (e) {
+                // If parsing fails, check if it's our numeric domain issue
+                if (typeof input === 'string' && input.includes('291565')) {
+                    // Create a fake valid domain
+                    const fakeInput = input.replace(/291565/g, '291565.com');
+                    try {
+                        const result = originalParse(fakeInput, startRule);
+                        
+                        // Fix the result (remove .com)
+                        if (result && result.host === '291565.com') result.host = '291565';
+                        if (result && result.uri && result.uri.host === '291565.com') result.uri.host = '291565';
+                        
+                        return result;
+                    } catch (e2) { throw e; } // If it still fails, throw original error
+                }
+                throw e;
+            }
+        };
+    } else {
+        alert("CRITICAL: SIP.js failed to load. Restore the original .js file!");
+    }
+
+    // ============================================================
     // CONFIGURATION
     // ============================================================
     const WS_SERVER = "wss://core2-mia.ringlogix.com:9002"; 
@@ -79,32 +114,6 @@
     let registerer = null;
     let currentSession = null;
 
-    // ============================================================
-    // RUNTIME PATCH (The Magic Fix)
-    // ============================================================
-    // This allows us to use the original library file without syntax errors.
-    // It overrides the grammar parsing rule for URI Hostnames.
-    try {
-        if (window.SIP && SIP.Grammar) {
-            console.log("Applying Runtime Patch to SIP.Grammar...");
-            // Save original parse function
-            const originalParse = SIP.Grammar.parse;
-            
-            // Override parse
-            SIP.Grammar.parse = function(uri, options) {
-                // If it looks like a numeric domain URI, we pre-process it
-                // We add a temp placeholder to pass validation, then strip it? 
-                // Actually, easier to just catch the specific error and force a manual URI object.
-                return originalParse(uri, options);
-            };
-            
-            // Note: Patching the internal Grammar rules of a minified library is hard.
-            // Instead, we will use a Try-Catch block in the main logic to manually build
-            // the URI object if the parser fails. This is safer.
-        }
-    } catch(e) { console.error("Patch failed", e); }
-
-
     function log(msg, type = "info") {
         const timestamp = new Date().toLocaleTimeString();
         const el = document.createElement("div");
@@ -118,7 +127,7 @@
     }
 
     // ============================================================
-    // CONNECTION LOGIC
+    // CONNECT LOGIC
     // ============================================================
     async function connectToPBX() {
         const loginStr = inputLogin.value.trim(); 
@@ -133,31 +142,28 @@
         const tenantDomain = parts[1].trim();  
         const deviceUser = `${userExt}wp`; // 101wp
 
+        // Identity: sip:101wp@291565
         const identityUri = `sip:${deviceUser}@${tenantDomain}`;
         
         log(`🔹 Identity: ${identityUri}`);
 
-        // --- MANUAL URI CONSTRUCTION ---
-        // Instead of SIP.UserAgent.makeURI() which uses the strict parser,
-        // We construct the object manually to bypass validation.
+        // Construct URI
         let mySipUri;
         try {
-            // New SIP.URI(scheme, user, host)
-            // This constructor is less strict than makeURI()
+            // Using the constructor directly (Patch handles the rest)
             mySipUri = new SIP.URI("sip", deviceUser, tenantDomain);
         } catch (e) {
             log(`❌ URI Error: ${e}`, "error");
-            // FALLBACK: If constructor fails, we use the Trailing Dot Hack again
-            // This is the only way if we can't patch the file.
-            log("⚠️ Attempting Trailing Dot Hack...", "warning");
-            mySipUri = SIP.UserAgent.makeURI(`sip:${deviceUser}@${tenantDomain}.`);
+            return;
         }
 
         userAgent = new SIP.UserAgent({
             uri: mySipUri,
             displayName: "AmpDialer",
+            
             authorizationUsername: identityUri, 
             authorizationPassword: password,
+
             transportOptions: { server: WS_SERVER },
             contactName: deviceUser,
             hackIpInContact: true,
@@ -169,18 +175,18 @@
 
         try {
             await userAgent.start();
-            log("✅ User Agent Started. Connecting...", "info");
+            log("✅ SIP Agent Started. Connecting...", "info");
             btnConnect.disabled = true;
             btnConnect.innerText = "Connecting...";
         } catch (err) {
-            log(`❌ Start Error: ${err}`, "error");
+            log(`❌ Error starting SIP Agent: ${err}`, "error");
             btnConnect.disabled = false;
         }
     }
 
     function setupEventHandlers() {
         userAgent.transport.stateChange.addListener((state) => {
-            log(`📡 Transport: ${state}`);
+            log(`📡 Transport State: ${state}`);
             if (state === SIP.TransportState.Connected) {
                 log("✅ WebSocket Connected! Registering...", "success");
                 registerDevice();
@@ -200,24 +206,32 @@
 
     function registerDevice() {
         registerer = new SIP.Registerer(userAgent);
+
         registerer.stateChange.addListener((state) => {
-            log(`📝 Registration: ${state}`);
+            log(`📝 Registration State: ${state}`);
+            
             if (state === SIP.RegistererState.Registered) {
-                log("✅ REGISTERED! READY TO CALL.", "success");
+                log("✅ DEVICE REGISTERED! READY TO CALL.", "success");
                 btnConnect.innerText = "Connected";
                 btnDial.disabled = false;
                 btnHangup.disabled = true;
             } else if (state === SIP.RegistererState.Terminated) {
-                log("⚠️ Registration Failed. Check Password.", "error");
+                log("⚠️ Registration Terminated. Check Password.", "warning");
             }
         });
-        registerer.register().catch((error) => {
-            log(`❌ Registration Request Failed: ${error}`, "error");
-        });
+
+        registerer.register()
+            .catch((error) => {
+                log(`❌ Registration Failed: ${error}`, "error");
+            });
     }
 
     async function makeCall() {
+        if (!userAgent || !userAgent.transport.isConnected()) return log("❌ Not Connected.", "error");
+
         const dest = inputDest.value.trim();
+        if (!dest) return log("❌ Enter a number.", "error");
+
         const tenantDomain = inputLogin.value.split('@')[1].trim();
         log(`📞 Dialing ${dest}...`);
 
@@ -225,7 +239,8 @@
         try {
             target = new SIP.URI("sip", dest, tenantDomain);
         } catch(e) {
-            target = SIP.UserAgent.makeURI(`sip:${dest}@${tenantDomain}.`);
+             // Fallback for dialing if constructor throws
+             target = SIP.UserAgent.makeURI(`sip:${dest}@${tenantDomain}`);
         }
 
         const inviter = new SIP.Inviter(userAgent, target, {
@@ -233,6 +248,7 @@
         });
 
         handleCallSession(inviter);
+
         inviter.invite().catch((e) => log(`❌ Invite Failed: ${e}`, "error"));
     }
 
