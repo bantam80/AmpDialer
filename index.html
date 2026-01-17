@@ -156,12 +156,9 @@
        PART 2: SIP.JS (THE SOFTPHONE)
        ========================================= */
     function initializeSoftphone(sipUser, sipPass, domain) {
-        // Extract Hostname (e.g., pbx.simplelogin.net)
-        const pbxHost = new URL(CONFIG.apiBase).hostname;
-
+        // 👇 CORRECT SERVER: Use the first 'Core' server from your scrape
         const transportOptions = {
-            // 👇 CORRECT PORT FOUND: 9002
-            server: `wss://${pbxHost}:9002` 
+            server: 'wss://core2-mia.ringlogix.com:9002'
         };
 
         console.log(`🔌 Connecting to WebSocket: ${transportOptions.server}`);
@@ -173,7 +170,7 @@
             transportOptions: transportOptions,
             authorizationUsername: sipUser,
             authorizationPassword: sipPass,
-            // Keepalive ensures the connection stays open
+            // These flags help with firewalls and keep connections alive
             hackViaTcp: true, 
             delegate: {
                 onConnect: () => {
