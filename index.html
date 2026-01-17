@@ -53,24 +53,23 @@
        CONFIGURATION
        ========================================= */
     const CONFIG = {
-        // Your Python Proxy on Render
-        authProxyUrl: 'https://ampdialer.onrender.com/auth/login', 
+        // RELATIVE PATH: Now that HTML is served by the backend, we use relative path
+        authProxyUrl: '/auth/login', 
         
-        // Your Specific PBX Cluster (Must include /v2 for frontend lookup)
+        // FRONTEND API: Must include /v2 for data lookup
         apiBase: 'https://pbx.simplelogin.net/ns-api/v2' 
     };
 
     let userAgent; 
     let isDialing = false;
 
-    // Zoho Mock Data
     const leads = [
         { Name: 'Bartow Industries', Phone: '17705550101' },
         { Name: 'Cartersville Paving', Phone: '17705550102' }
     ];
 
     /* =========================================
-       PART 1: AUTHENTICATION (Debug Mode)
+       PART 1: AUTHENTICATION
        ========================================= */
     async function handleLogin() {
         const fullUsername = document.getElementById('rl-username').value.trim();
@@ -100,7 +99,7 @@
             if (!authRes.ok) throw new Error("Login failed. Check credentials.");
             const authData = await authRes.json();
             
-            // B. DISCOVER DEVICE
+            // B. DISCOVER DEVICE (Just to get the username)
             console.log("Step B: Looking up Devices...");
             const explicitUrl = `${CONFIG.apiBase}/domains/${domainPart}/users/${userPart}/devices`;
             
@@ -114,14 +113,9 @@
             let devices = await devicesRes.json();
             if (!Array.isArray(devices)) devices = [devices];
 
-            // 🔍 DEBUG: Print the exact structure the API is returning
-            console.log("--- DEBUG: RAW DEVICE DATA ---");
-            console.log(JSON.stringify(devices, null, 2)); 
-            console.log("------------------------------");
-
-            // C. SELECT DEVICE
-            // We prioritize 'wp' but take anything available
+            // C. SELECT DEVICE (Look for 'wp' first)
             let targetDevice = devices.find(d => d.device && d.device.includes('wp@'));
+            
             if (!targetDevice) {
                 console.log("'wp' device not found, using first available device.");
                 targetDevice = devices[0];
@@ -129,20 +123,15 @@
 
             if (!targetDevice) throw new Error("No SIP devices found for this user.");
 
-            // D. PARSE USERNAME (Updated to check more fields)
-            // We check every possible variation of "username"
-            let sipUser = targetDevice.sip_username || 
-                          targetDevice.username || 
-                          targetDevice.aor || 
-                          targetDevice.subscriber_name;
-
-            // Fallback: Parse from 'device' string (e.g. sip:101wp@domain)
+            // D. PARSE SIP USERNAME
+            let sipUser = targetDevice.sip_username || targetDevice.username;
+            
             if (!sipUser && targetDevice.device) {
                 const match = targetDevice.device.match(/sip:(.*?)@/);
                 if (match) sipUser = match[1];
             }
-
-            if (!sipUser) throw new Error("Could not determine SIP Username. Check Console Logs.");
+            
+            if (!sipUser) throw new Error("Could not determine SIP Username.");
 
             // E. INITIALIZE
             console.log(`Initializing SIP with User: ${sipUser} @ ${domainPart}`);
@@ -164,7 +153,7 @@
        ========================================= */
     function initializeSoftphone(sipUser, sipPass, domain) {
         const transportOptions = {
-            server: `wss://${domain}:8089` // Standard NetSapiens WSS Port
+            server: `wss://${domain}:8089` 
         };
 
         const uri = SIP.UserAgent.makeURI(`sip:${sipUser}@${domain}`);
@@ -206,13 +195,10 @@
         isDialing = true;
         for (let i = 0; i < leads.length; i++) {
             if (!isDialing) break;
-            
             document.querySelectorAll('.lead-row').forEach(r => r.classList.remove('active'));
             document.getElementById(`row-${i}`).classList.add('active');
             
             await placeCall(leads[i].Phone);
-            
-            // Wait 5 seconds between calls
             await new Promise(r => setTimeout(r, 5000));
         }
     }
