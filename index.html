@@ -57,9 +57,11 @@
 
 <script>
     // ============================================================
-    // CONFIGURATION & GLOBAL VARIABLES
+    // CONFIGURATION
     // ============================================================
     const WS_SERVER = "wss://core2-mia.ringlogix.com:9002"; 
+    // We use a valid domain for SIP.js to be happy, but auth with the correct user
+    const SIP_DOMAIN = "ringlogix.com"; 
 
     // UI References
     const outputDiv = document.getElementById("output");
@@ -82,10 +84,8 @@
         const timestamp = new Date().toLocaleTimeString();
         const el = document.createElement("div");
         el.innerText = `[${timestamp}] ${msg}`;
-        
         if (type === "error") el.style.color = "#ff4d4d"; 
         if (type === "success") el.style.color = "#4dff4d"; 
-        
         outputDiv.appendChild(el);
         outputDiv.scrollTop = outputDiv.scrollHeight; 
         console.log(msg);
@@ -103,7 +103,6 @@
             return;
         }
 
-        // 1. CLEAN & PARSE
         const parts = loginStr.split('@');
         if (parts.length !== 2) {
             log("❌ Invalid Login Format. Must be: Ext@Domain", "error");
@@ -112,49 +111,39 @@
 
         const userExt = parts[0].trim();       
         const tenantDomain = parts[1].trim();  
-        const deviceUser = `${userExt}wp`; // Adds "wp" suffix
-        
+        const deviceUser = `${userExt}wp`; 
+
         log(`🔹 User: ${deviceUser}`);
-        log(`🔹 Domain: ${tenantDomain}`);
+        log(`🔹 Tenant Domain: ${tenantDomain}`);
 
-        // 2. GENERATE URI (BYPASSING PARSER)
-        let mySipUri;
-        try {
-            // Force the URI to accept the numeric domain
-            mySipUri = new SIP.URI("sip", deviceUser, tenantDomain);
-        } catch (e) {
-            log(`⚠️ URI Constructor failed: ${e}`, "error");
-        }
+        // ---------------------------------------------------------
+        // THE FIX: Use standard domain for URI, but specific Auth
+        // ---------------------------------------------------------
+        
+        // 1. Create URI using ringlogix.com (Safe for Parser)
+        const mySipUri = SIP.UserAgent.makeURI(`sip:${deviceUser}@${SIP_DOMAIN}`);
 
-        if (!mySipUri) {
-            log("❌ CRITICAL: Could not generate URI.", "error");
-            return;
-        }
-
-        log(`🚀 Identity Created: ${mySipUri.toString()}`);
-
-        // 3. CONFIGURE USER AGENT
+        // 2. Configure UA
         userAgent = new SIP.UserAgent({
             uri: mySipUri,
             displayName: "Hammer Console",
             
-            // Credentials
+            // KEY: This is what the server checks for the password
             authorizationUsername: deviceUser, 
             authorizationPassword: password,
 
-            // Server
             transportOptions: {
                 server: WS_SERVER
             },
             
             contactName: deviceUser,
+            // 'hackIpInContact' helps with some strict NAT/Firewalls
+            hackIpInContact: true,
             logLevel: "error"
         });
 
-        // 4. SETUP EVENTS
         setupEventHandlers();
 
-        // 5. START
         try {
             await userAgent.start();
             log("✅ SIP Agent Started. Connecting WebSocket...", "info");
@@ -164,12 +153,11 @@
     }
 
     function setupEventHandlers() {
-        // Transport State (WebSocket)
+        // Transport
         userAgent.transport.stateChange.addListener((state) => {
             log(`📡 Transport State: ${state}`);
-            
             if (state === SIP.TransportState.Connected) {
-                log("✅ WebSocket Connected! Attempting Registration...", "success");
+                log("✅ WebSocket Connected! Registering...", "success");
                 registerDevice();
             } else if (state === SIP.TransportState.Disconnected) {
                 log("⚠️ WebSocket Disconnected", "error");
@@ -178,12 +166,11 @@
             }
         });
 
-        // Incoming Call Handling
+        // Incoming Calls
         userAgent.delegate = {
             onInvite: (invitation) => {
                 log("📞 Incoming Call...");
                 currentSession = invitation;
-                
                 invitation.stateChange.addListener((state) => {
                     log(`Incoming Call State: ${state}`);
                     if (state === SIP.SessionState.Terminated) {
@@ -199,24 +186,19 @@
     // REGISTRATION
     // ============================================================
     function registerDevice() {
+        // We pass empty options or specific headers if needed
         registerer = new SIP.Registerer(userAgent);
 
         registerer.stateChange.addListener((state) => {
             log(`📝 Registration State: ${state}`);
-            
             if (state === SIP.RegistererState.Registered) {
                 log("✅ DEVICE REGISTERED! READY TO CALL.", "success");
                 btnConnect.disabled = true;
                 btnConnect.innerText = "Connected";
-            } else if (state === SIP.RegistererState.Terminated) {
-                log("⚠️ Registration Terminated");
             }
         });
 
         registerer.register()
-            .then((request) => {
-                log("📤 Register Request Sent...");
-            })
             .catch((error) => {
                 log(`❌ Registration Failed: ${error}`, "error");
             });
@@ -239,14 +221,8 @@
 
         log(`📞 Dialing ${dest}...`);
 
-        // Use the tenant domain from the login box for the dial target
-        const tenantDomain = inputLogin.value.split('@')[1].trim();
-        let target;
-        try {
-             target = new SIP.URI("sip", dest, tenantDomain);
-        } catch(e) {
-             target = SIP.UserAgent.makeURI(`sip:${dest}@${tenantDomain}`);
-        }
+        // Target the standard domain. The server routes based on the number.
+        const target = SIP.UserAgent.makeURI(`sip:${dest}@${SIP_DOMAIN}`);
 
         const inviter = new SIP.Inviter(userAgent, target, {
             sessionDescriptionHandlerOptions: {
@@ -256,10 +232,8 @@
 
         currentSession = inviter;
 
-        // Monitor Call State
         inviter.stateChange.addListener((state) => {
             log(`Call State: ${state}`);
-            
             switch (state) {
                 case SIP.SessionState.Establishing:
                     log("🔔 Ringing...");
@@ -275,15 +249,11 @@
             }
         });
 
-        // Send the Invite
         inviter.invite()
             .then(() => log("Invite Sent"))
             .catch((e) => log(`❌ Invite Failed: ${e}`, "error"));
     }
 
-    // ============================================================
-    // MEDIA & HANGUP
-    // ============================================================
     function setupRemoteMedia(session) {
         const remoteStream = new MediaStream();
         session.sessionDescriptionHandler.peerConnection.getReceivers().forEach((receiver) => {
@@ -297,7 +267,6 @@
 
     function hangupCall() {
         if (!currentSession) return;
-
         if (currentSession.state === SIP.SessionState.Established) {
             currentSession.bye();
         } else if (currentSession.state === SIP.SessionState.Establishing) {
