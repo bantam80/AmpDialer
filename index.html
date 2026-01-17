@@ -156,12 +156,12 @@
        PART 2: SIP.JS (THE SOFTPHONE)
        ========================================= */
     function initializeSoftphone(sipUser, sipPass, domain) {
-        // 👇 FIX: Extract the actual hostname (pbx.simplelogin.net) from the API URL
+        // Extract Hostname (pbx.simplelogin.net)
         const pbxHost = new URL(CONFIG.apiBase).hostname;
 
         const transportOptions = {
-            // We connect to the PBX Hostname, NOT the numeric Domain ID
-            server: `wss://${pbxHost}:8089` 
+            // 👇 FIX: Use Port 443 (Standard HTTPS/WSS port) instead of 8089
+            server: `wss://${pbxHost}:443` 
         };
 
         const uri = SIP.UserAgent.makeURI(`sip:${sipUser}@${domain}`);
