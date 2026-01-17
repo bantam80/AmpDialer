@@ -3,11 +3,11 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Hammer Console - SIP Dialer</title>
+    <title>AmpDialer - Amplifire Console</title>
     <style>
         body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; padding: 20px; background-color: #f4f4f9; color: #333; }
         .container { max-width: 600px; margin: 0 auto; background: white; padding: 25px; border-radius: 10px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); }
-        h2 { margin-top: 0; color: #2c3e50; }
+        h2 { margin-top: 0; color: #e67e22; /* Orange for Amplifire style? */ }
         .input-group { margin-bottom: 15px; }
         label { display: block; margin-bottom: 5px; font-weight: 600; color: #555; }
         input { width: 100%; padding: 10px; box-sizing: border-box; border: 1px solid #ddd; border-radius: 5px; font-size: 14px; }
@@ -31,7 +31,7 @@
 <body>
 
 <div class="container">
-    <h2>Hammer Console (WebPhone)</h2>
+    <h2>🔥 AmpDialer</h2>
 
     <div class="status-bar">
         <div class="input-group">
@@ -69,7 +69,8 @@
     // CONFIGURATION
     // ============================================================
     const WS_SERVER = "wss://core2-mia.ringlogix.com:9002"; 
-    // We use the specific server hostname to avoid numeric domain parser errors
+    
+    // We use the hostname for the URI to keep the SIP.js Parser happy
     const SIP_DOMAIN = "core2-mia.ringlogix.com"; 
 
     // UI References
@@ -123,13 +124,14 @@
 
         const userExt = parts[0].trim();       
         const tenantDomain = parts[1].trim();  
-        const deviceUser = `${userExt}wp`; // Append 'wp' for webphone
+        const deviceUser = `${userExt}wp`; // 101wp
 
-        log(`🔹 User: ${deviceUser}`);
-        log(`🔹 Tenant Domain: ${tenantDomain}`);
+        // THE FIX: Auth as "101wp@291565" so the server knows our tenant.
+        const authUser = `${deviceUser}@${tenantDomain}`;
 
-        // Construct URI using the SERVER hostname (valid domain)
-        // This avoids the "291565" parser crash.
+        log(`🔹 Identity: ${deviceUser}@${SIP_DOMAIN}`);
+        log(`🔹 Auth ID:  ${authUser}`);
+
         const mySipUri = SIP.UserAgent.makeURI(`sip:${deviceUser}@${SIP_DOMAIN}`);
 
         if (!mySipUri) {
@@ -137,24 +139,19 @@
             return;
         }
 
-        log(`🚀 Configured Identity: ${mySipUri.toString()}`);
-
-        // Configure User Agent
         userAgent = new SIP.UserAgent({
             uri: mySipUri,
-            displayName: "Hammer Console",
+            displayName: "AmpDialer", // BRANDING UPDATE
             
-            // Credentials
-            authorizationUsername: deviceUser, 
+            // KEY CHANGE: Include the tenant domain in the auth username
+            authorizationUsername: authUser, 
             authorizationPassword: password,
 
-            // Server Connection
             transportOptions: {
                 server: WS_SERVER
             },
             
             contactName: deviceUser,
-            // Compatibility tweaks for Netsapiens
             hackIpInContact: true,
             logLevel: "error" 
         });
@@ -163,7 +160,7 @@
 
         try {
             await userAgent.start();
-            log("✅ SIP Agent Started. Connecting to WebSocket...", "info");
+            log("✅ SIP Agent Started. Connecting...", "info");
             btnConnect.disabled = true;
             btnConnect.innerText = "Connecting...";
         } catch (err) {
@@ -173,12 +170,11 @@
     }
 
     function setupEventHandlers() {
-        // Transport State (WebSocket)
         userAgent.transport.stateChange.addListener((state) => {
             log(`📡 Transport State: ${state}`);
             
             if (state === SIP.TransportState.Connected) {
-                log("✅ WebSocket Connected! Initiating Registration...", "success");
+                log("✅ WebSocket Connected! Registering...", "success");
                 registerDevice();
             } else if (state === SIP.TransportState.Disconnected) {
                 log("⚠️ WebSocket Disconnected", "error");
@@ -186,7 +182,6 @@
             }
         });
 
-        // Incoming Calls
         userAgent.delegate = {
             onInvite: (invitation) => {
                 log("📞 Incoming Call...");
@@ -201,29 +196,24 @@
     function registerDevice() {
         registerer = new SIP.Registerer(userAgent);
 
-        // Monitor Registration State
         registerer.stateChange.addListener((state) => {
             log(`📝 Registration State: ${state}`);
             
             if (state === SIP.RegistererState.Registered) {
                 log("✅ DEVICE REGISTERED! READY TO CALL.", "success");
-                
-                // Update UI
                 btnConnect.innerText = "Connected";
                 btnDial.disabled = false;
                 btnDial.innerText = "Step 2: Dial";
                 btnHangup.disabled = true;
-
             } else if (state === SIP.RegistererState.Terminated) {
-                log("⚠️ Registration Failed or Terminated. Check Password.", "warning");
-                resetUI();
+                // If this happens, it usually means 403 Forbidden (Bad Password)
+                log("⚠️ Registration Terminated. Check Password.", "warning");
             }
         });
 
         registerer.register()
             .catch((error) => {
-                log(`❌ Registration Request Failed: ${error}`, "error");
-                resetUI();
+                log(`❌ Registration Failed: ${error}`, "error");
             });
     }
 
@@ -244,7 +234,7 @@
 
         log(`📞 Dialing ${dest}...`);
 
-        // Target the call to the server domain
+        // Dial through the main server domain
         const target = SIP.UserAgent.makeURI(`sip:${dest}@${SIP_DOMAIN}`);
 
         const inviter = new SIP.Inviter(userAgent, target, {
@@ -255,14 +245,13 @@
 
         handleCallSession(inviter);
 
-        // Send the Invite
         inviter.invite()
             .then(() => log("Invite Sent"))
             .catch((e) => log(`❌ Invite Failed: ${e}`, "error"));
     }
 
     // ============================================================
-    // CALL HANDLING (Common for Inbound & Outbound)
+    // CALL HANDLING
     // ============================================================
     function handleCallSession(session) {
         currentSession = session;
@@ -296,21 +285,16 @@
             }
         });
         remoteAudio.srcObject = remoteStream;
-        
-        // Ensure audio plays (browser might block auto-play)
-        remoteAudio.play()
-            .catch(e => log("⚠️ Audio Play Error: Click the page to allow audio."));
+        remoteAudio.play().catch(e => log("⚠️ Audio Play Error: Click the page to allow audio."));
     }
 
     function hangupCall() {
         if (!currentSession) return;
-
         if (currentSession.state === SIP.SessionState.Established) {
             currentSession.bye();
         } else if (currentSession.state === SIP.SessionState.Establishing) {
             currentSession.cancel();
         }
-        // Cleanup happens in the state listener
     }
 
     function cleanupCall() {
