@@ -4,9 +4,14 @@
     <meta charset="UTF-8">
     <title>Zoho Power Dialer</title>
     
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/sip.js/0.21.2/sip.min.js" 
-            onerror="alert('Error: Could not load SIP.js library. Check internet connection or firewall.')"></script>
+    <script src="https://unpkg.com/sip.js@0.21.2/dist/sip.min.js"></script>
     
+    <script>
+        if (typeof SIP === 'undefined') {
+            document.write('<script src="https://cdn.jsdelivr.net/npm/sip.js@0.21.2/dist/sip.min.js"><\/script>');
+        }
+    </script>
+
     <script src="https://live.zwidgets.com/js-sdk/1.1/ZohoEmbededAppSDK.min.js"></script>
     
     <style>
@@ -56,7 +61,7 @@
        CONFIGURATION
        ========================================= */
     const CONFIG = {
-        // Full URL is safer when mixing GitHub Pages (Frontend) and Render (Backend)
+        // Full URL for Render Backend
         authProxyUrl: 'https://ampdialer.onrender.com/auth/login', 
         
         // NetSapiens API
@@ -76,6 +81,12 @@
        PART 1: AUTHENTICATION
        ========================================= */
     async function handleLogin() {
+        // CHECK IF LIBRARY LOADED
+        if (typeof SIP === 'undefined') {
+            alert("Error: SIP.js library failed to load. Please check your firewall/ad-blocker.");
+            return;
+        }
+
         const fullUsername = document.getElementById('rl-username').value.trim();
         const pass = document.getElementById('rl-password').value;
         const btn = document.querySelector('button');
@@ -117,8 +128,7 @@
             let devices = await devicesRes.json();
             if (!Array.isArray(devices)) devices = [devices];
 
-            // C. FIND MATCHING DEVICE
-            // Logic: Find the device that has the specific 'device-sip-registration-password' key
+            // C. FIND MATCHING DEVICE (Using the key we discovered in your logs)
             let targetDevice = devices.find(d => d['device-sip-registration-password']);
             
             if (!targetDevice) {
@@ -129,7 +139,6 @@
             if (!targetDevice) throw new Error("No SIP devices found.");
 
             // D. EXTRACT CREDENTIALS
-            // Use the exact keys we saw in your logs
             const sipUser = targetDevice.device; 
             const sipPass = targetDevice['device-sip-registration-password'];
             
@@ -140,12 +149,6 @@
 
             // E. INITIALIZE
             console.log(`Initializing SIP: ${sipUser} @ ${domainPart}`);
-            
-            // CHECK IF LIBRARY LOADED
-            if (typeof SIP === 'undefined') {
-                throw new Error("SIP.js library not loaded. Refresh or check connection.");
-            }
-
             initializeSoftphone(sipUser, sipPass, domainPart);
             
             document.getElementById('login-screen').classList.add('hidden');
@@ -233,7 +236,6 @@
             console.log("Dialing:", number);
             document.getElementById('sip-status').innerText = `Dialing ${number}...`;
             
-            // Correct way to target number in SIP.js
             const target = SIP.UserAgent.makeURI(`sip:${number}@${userAgent.configuration.uri.host}`);
             if (!target) { console.error("Invalid URI"); return; }
 
