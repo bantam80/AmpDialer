@@ -69,18 +69,22 @@
     ];
 
     /* =========================================
-       PART 1: AUTHENTICATION (Diagnostic Mode)
+       PART 1: AUTHENTICATION (Final "Mapped" Version)
        ========================================= */
     async function handleLogin() {
         const fullUsername = document.getElementById('rl-username').value.trim();
         const pass = document.getElementById('rl-password').value;
-        
-        // ... (Clear errors and UI updates) ...
         const btn = document.querySelector('button');
         const err = document.getElementById('login-error');
+        
         btn.innerText = "Authenticating...";
         err.innerText = "";
-        
+
+        if (!fullUsername.includes('@')) {
+            err.innerText = "Please use full format: user@domain.com";
+            btn.innerText = "Login & Initialize";
+            return;
+        }
         const [userPart, domainPart] = fullUsername.split('@');
 
         try {
@@ -109,37 +113,34 @@
             let devices = await devicesRes.json();
             if (!Array.isArray(devices)) devices = [devices];
 
-            // C. SELECT DEVICE (Try 'wp', fallback to first)
-            let targetDevice = devices.find(d => d.device && d.device.includes('wp@'));
+            // C. FIND MATCHING DEVICE
+            // We look for a device that has the specific password key we found in your logs
+            let targetDevice = devices.find(d => d['device-sip-registration-password']);
             
             if (!targetDevice) {
-                console.log("'wp' device not found, using first available device.");
+                // Fallback: Just take the first one and hope
+                console.warn("No device with password found, trying first available.");
                 targetDevice = devices[0];
             }
 
-            if (!targetDevice) throw new Error("No SIP devices found for this user.");
+            if (!targetDevice) throw new Error("No SIP devices found.");
 
-            // 🚨 DIAGNOSTIC: PRINT THE DEVICE WE FOUND 🚨
-            console.log("--- DIAGNOSTIC: TARGET DEVICE ---");
-            console.log(JSON.stringify(targetDevice, null, 2)); // <--- CHECK THIS IN CONSOLE
-            console.log("---------------------------------");
-
-            // D. PARSE SIP USERNAME (Updated Logic)
-            let sipUser = targetDevice.sip_username || 
-                          targetDevice.username || 
-                          targetDevice.subscriber_name;
+            // D. EXTRACT CREDENTIALS (Using the keys from your log)
+            // Username is in the 'device' field (e.g., '101ucm')
+            const sipUser = targetDevice.device;
+            // Password is in the special registration field
+            const sipPass = targetDevice['device-sip-registration-password'];
             
-            // Regex Fallback
-            if (!sipUser && targetDevice.device) {
-                const match = targetDevice.device.match(/sip:(.*?)@/);
-                if (match) sipUser = match[1];
+            if (!sipUser || !sipPass) {
+                console.error("Device Data:", targetDevice);
+                throw new Error("Device found, but missing SIP credentials.");
             }
-            
-            if (!sipUser) throw new Error("Could not determine SIP Username. See Diagnostic log.");
 
             // E. INITIALIZE
-            console.log(`Initializing SIP with User: ${sipUser} @ ${domainPart}`);
-            initializeSoftphone(sipUser, pass, domainPart);
+            console.log(`Initializing SIP: ${sipUser} @ ${domainPart}`);
+            
+            // Note: We use the API-provided password, NOT the user input password
+            initializeSoftphone(sipUser, sipPass, domainPart);
             
             document.getElementById('login-screen').classList.add('hidden');
             document.getElementById('dialer-screen').classList.remove('hidden');
