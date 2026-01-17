@@ -99,7 +99,20 @@
         console.log(`[AmpDialer] ${msg}`);
     }
 
+    // --- GLOBAL ERROR HANDLER (Debugging) ---
+    window.onerror = function(message, source, lineno, colno, error) {
+        log(`❌ CRITICAL JS ERROR: ${message}`);
+        return false;
+    };
+
     async function connectToPBX() {
+        log("🔄 Initiating Connection..."); // Immediate feedback
+
+        if (typeof SIP === 'undefined') {
+            log("❌ Error: SIP.js library not loaded! Check file path.");
+            return;
+        }
+
         const server = document.getElementById("serverAddress").value.trim();
         const ext = document.getElementById("sipExt").value.trim();
         const domain = document.getElementById("sipDomain").value.trim();
@@ -110,20 +123,20 @@
             return;
         }
 
-        // --- DEFINITIONS ---
-        const safeUri = `sip:${ext}@${server}`;
-        const realUri = `sip:${ext}@${domain}`;
+        // 1. Setup URIs
+        const safeUri = `sip:${ext}@${server}`;   // Internal (Safe)
+        const realUri = `sip:${ext}@${domain}`;   // External (PBX)
 
         const targetURI = SIP.UserAgent.makeURI(safeUri);
         const wsServerURL = `wss://${server}`;
+        
         log(`🔗 Connecting to ${wsServerURL}...`);
 
         userAgent = new SIP.UserAgent({
             transportConstructor: SIP.WebSocketTransport,
             transportOptions: { server: wsServerURL },
             uri: targetURI,
-            // UPDATED: Use only extension for Auth Username
-            authorizationUsername: ext, 
+            authorizationUsername: ext,  // <-- FIXED: Extension only (fixes 401)
             authorizationPassword: password,
             delegate: {
                 onConnect: () => log("✅ WebSocket Connected! Registering..."),
@@ -136,28 +149,40 @@
         });
 
         // =========================================================
-        // 🛡️ THE DOUBLE AGENT INTERCEPTOR 🛡️
+        // 🛡️ HEADER INTERCEPTOR (Fixes 403 & Crashes) 🛡️
         // =========================================================
+        
+        // A. Outgoing Hack (Fixes 403 Forbidden)
         const originalSend = userAgent.transport.send;
         userAgent.transport.send = function(message) {
+            // Replace the "Safe URI" with the "Real URI" before sending to network
             let newMessage = message.replaceAll(safeUri, realUri);
             if (message !== newMessage) {
-                console.log(`⚡ [OUT] Swapped Safe URI -> Real URI`);
+                // console.log("⚡ [OUT] Swapped Header"); // Uncomment to debug
             }
             return originalSend.apply(this, [newMessage]);
         };
 
+        // B. Incoming Hack (Prevents Browser Crash)
         const originalOnMessage = userAgent.transport.onMessage;
         userAgent.transport.onMessage = function(msg) {
-            let data = msg;
-            if (typeof msg === 'object' && msg.data) {
-                 data = msg.data;
+            let data = msg; 
+            // SIP.js usually passes string, but safety check:
+            if (typeof msg === 'object' && msg.data) data = msg.data;
+
+            if (typeof data === 'string') {
+                // Swap "Real URI" back to "Safe URI" so SIP.js doesn't choke on it
+                let newData = data.replaceAll(realUri, safeUri);
+                if (data !== newData) {
+                    // console.log("⚡ [IN] Swapped Header"); // Uncomment to debug
+                }
+                // Call original handler with sanitized data
+                if (originalOnMessage) {
+                    return originalOnMessage.call(this, newData);
+                }
             }
-            let newData = data.replaceAll(realUri, safeUri);
-            if (data !== newData) {
-                console.log(`⚡ [IN] Swapped Real URI -> Safe URI (Prevented Crash)`);
-            }
-            return originalOnMessage.call(this, newData);
+            // Fallback
+            if (originalOnMessage) return originalOnMessage.call(this, msg);
         };
         // =========================================================
 
@@ -195,7 +220,7 @@
         const dest = document.getElementById("destNumber").value.trim();
         if (!dest || !userAgent) return;
 
-        // Use the SAFE internal domain for logic
+        // Use safe URI for internal logic
         const target = SIP.UserAgent.makeURI(`sip:${dest}@${userAgent.configuration.uri.host}`);
         log(`📞 Dialing ${dest}...`);
 
@@ -247,3 +272,32 @@
             }
         });
     }
+
+    function setupRemoteMedia(session) {
+        const remoteStream = new MediaStream();
+        session.sessionDescriptionHandler.peerConnection.getReceivers().forEach((receiver) => {
+            if (receiver.track) remoteStream.addTrack(receiver.track);
+        });
+        remoteAudio.srcObject = remoteStream;
+        remoteAudio.play().catch(e => log("⚠️ Autoplay blocked: Click page to enable audio"));
+    }
+
+    function cleanupCall() {
+        currentSession = null;
+        btnDial.disabled = false;
+        btnHangup.disabled = true;
+        btnAnswer.classList.add("hidden");
+    }
+
+    function hangupCall() {
+        if (!currentSession) return;
+        if (currentSession.state === SIP.SessionState.Established) currentSession.bye();
+        else if (currentSession.state === SIP.SessionState.Establishing) currentSession.cancel();
+    }
+
+    btnConnect.addEventListener("click", connectToPBX);
+    btnDial.addEventListener("click", makeCall);
+    btnHangup.addEventListener("click", hangupCall);
+</script>
+</body>
+</html>
