@@ -59,7 +59,6 @@
     // ============================================================
     // CONFIGURATION & GLOBAL VARIABLES
     // ============================================================
-    // The WebSocket server found in your logs
     const WS_SERVER = "wss://core2-mia.ringlogix.com:9002"; 
 
     // UI References
@@ -73,6 +72,7 @@
     const remoteAudio = document.getElementById("remoteAudio");
 
     let userAgent = null;
+    let registerer = null;
     let currentSession = null;
 
     // ============================================================
@@ -83,16 +83,16 @@
         const el = document.createElement("div");
         el.innerText = `[${timestamp}] ${msg}`;
         
-        if (type === "error") el.style.color = "#ff4d4d"; // Red
-        if (type === "success") el.style.color = "#4dff4d"; // Green
+        if (type === "error") el.style.color = "#ff4d4d"; 
+        if (type === "success") el.style.color = "#4dff4d"; 
         
         outputDiv.appendChild(el);
-        outputDiv.scrollTop = outputDiv.scrollHeight; // Auto-scroll
+        outputDiv.scrollTop = outputDiv.scrollHeight; 
         console.log(msg);
     }
 
     // ============================================================
-    // STEP 1: DYNAMIC CONNECTION (FIXED)
+    // STEP 1: CONNECT & REGISTER
     // ============================================================
     async function connectToPBX() {
         const loginStr = inputLogin.value.trim(); 
@@ -110,35 +110,24 @@
             return;
         }
 
-        // AGGRESSIVE TRIMMING (Fixes "Failed to create URI" caused by spaces)
         const userExt = parts[0].trim();       
         const tenantDomain = parts[1].trim();  
-        
-        // 2. CONSTRUCT IDENTITY
         const deviceUser = `${userExt}wp`; // Adds "wp" suffix
         
-        log(`🔹 Parsing: User='${userExt}', Domain='${tenantDomain}'`);
-
-        // 3. GENERATE URI (With Error Catching)
-        // We try the Tenant Domain first (e.g. 291565)
-        let uriString = `sip:${deviceUser}@${tenantDomain}`;
-        let mySipUri = SIP.UserAgent.makeURI(uriString);
-
-        // Fallback: If parser rejects "291565", try the main domain
-        if (!mySipUri) {
-            log(`⚠️ Parser rejected '${uriString}'. Trying fallback domain...`, "error");
-            uriString = `sip:${deviceUser}@ringlogix.com`; // Fallback
-            mySipUri = SIP.UserAgent.makeURI(uriString);
-        }
+        // 2. GENERATE URI 
+        // We use 'ringlogix.com' because SIP.js rejects numeric domains like '291565'.
+        // The server will identify us via the 'authorizationUsername' (101wp) anyway.
+        const uriString = `sip:${deviceUser}@ringlogix.com`;
+        const mySipUri = SIP.UserAgent.makeURI(uriString);
 
         if (!mySipUri) {
             log(`❌ CRITICAL: Could not generate URI from '${uriString}'`, "error");
             return;
         }
 
-        log(`🚀 Identity Created: ${mySipUri.toString()}`);
+        log(`🚀 Config: URI=${mySipUri.toString()}, AuthUser=${deviceUser}`);
 
-        // 4. CONFIGURATION
+        // 3. CONFIGURE USER AGENT
         userAgent = new SIP.UserAgent({
             uri: mySipUri,
             displayName: "Hammer Console",
@@ -152,64 +141,83 @@
                 server: WS_SERVER
             },
             
-            register: true, 
             contactName: deviceUser,
-            // Debug Mode: see exactly why SIP.js might be unhappy in the browser console
-            logLevel: "debug" 
+            logLevel: "error"
         });
 
+        // 4. SETUP EVENTS (Fixed for v0.21)
         setupEventHandlers();
 
+        // 5. START
         try {
             await userAgent.start();
-            log("✅ SIP Agent Started. Connecting...", "success");
+            log("✅ SIP Agent Started. Connecting WebSocket...", "info");
         } catch (err) {
             log(`❌ Error starting SIP Agent: ${err}`, "error");
         }
     }
 
-    // ============================================================
-    // EVENT HANDLERS
-    // ============================================================
     function setupEventHandlers() {
-        // WebSocket State
-        userAgent.transport.on("connected", () => {
-            log("✅ WebSocket Connected!", "success");
-        });
-        
-        userAgent.transport.on("disconnected", () => {
-            log("⚠️ WebSocket Disconnected", "error");
-            btnConnect.disabled = false;
-            btnConnect.innerText = "Step 1: Connect & Register";
-        });
-
-        // Registration State
-        userAgent.on("registered", () => {
-            log("✅ Registered! Ready to make calls.", "success");
-            btnConnect.disabled = true;
-            btnConnect.innerText = "Connected";
-        });
-
-        userAgent.on("registrationFailed", (response) => {
-            log(`❌ Registration Failed: ${response.cause}`, "error");
+        // Transport State (WebSocket)
+        userAgent.transport.stateChange.addListener((state) => {
+            log(`📡 Transport State: ${state}`);
+            
+            if (state === SIP.TransportState.Connected) {
+                log("✅ WebSocket Connected! Attempting Registration...", "success");
+                registerDevice();
+            } else if (state === SIP.TransportState.Disconnected) {
+                log("⚠️ WebSocket Disconnected", "error");
+                btnConnect.disabled = false;
+                btnConnect.innerText = "Step 1: Connect & Register";
+            }
         });
 
         // Incoming Call Handling
-        userAgent.on("invite", (invitation) => {
-            log("📞 Incoming Call...");
-            currentSession = invitation;
+        userAgent.delegate = {
+            onInvite: (invitation) => {
+                log("📞 Incoming Call...");
+                currentSession = invitation;
+                
+                // Monitor the incoming session
+                invitation.stateChange.addListener((state) => {
+                    log(`Incoming Call State: ${state}`);
+                    if (state === SIP.SessionState.Terminated) {
+                        log("Call Ended");
+                        currentSession = null;
+                    }
+                });
+            }
+        };
+    }
+
+    // ============================================================
+    // REGISTRATION (Required for v0.21)
+    // ============================================================
+    function registerDevice() {
+        // Create a Registerer instance
+        registerer = new SIP.Registerer(userAgent);
+
+        // Setup Registration Events
+        registerer.stateChange.addListener((state) => {
+            log(`📝 Registration State: ${state}`);
             
-            // Auto-accept for testing (or add a button to accept)
-            // invitation.accept(); 
-            
-            // Handle cleanup when call ends
-            invitation.stateChange.addListener((state) => {
-                if (state === SIP.SessionState.Terminated) {
-                    log("Call Ended");
-                    currentSession = null;
-                }
-            });
+            if (state === SIP.RegistererState.Registered) {
+                log("✅ DEVICE REGISTERED! READY TO CALL.", "success");
+                btnConnect.disabled = true;
+                btnConnect.innerText = "Connected";
+            } else if (state === SIP.RegistererState.Terminated) {
+                log("⚠️ Registration Terminated");
+            }
         });
+
+        // Send Register Request
+        registerer.register()
+            .then((request) => {
+                log("📤 Register Request Sent...");
+            })
+            .catch((error) => {
+                log(`❌ Registration Failed: ${error}`, "error");
+            });
     }
 
     // ============================================================
@@ -229,11 +237,8 @@
 
         log(`📞 Dialing ${dest}...`);
 
-        // Create target URI. We can use the WS_SERVER domain or the Login domain.
-        // Usually, the server handles routing just fine if we send sip:NUMBER@DOMAIN
-        // We use the tenant domain parsed from the login input.
-        const tenantDomain = inputLogin.value.split('@')[1];
-        const target = SIP.UserAgent.makeURI(`sip:${dest}@${tenantDomain}`);
+        // We target the main domain
+        const target = SIP.UserAgent.makeURI(`sip:${dest}@ringlogix.com`);
 
         const inviter = new SIP.Inviter(userAgent, target, {
             sessionDescriptionHandlerOptions: {
