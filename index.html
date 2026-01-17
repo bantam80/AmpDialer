@@ -8,286 +8,284 @@
         body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; padding: 20px; background-color: #f4f4f9; color: #333; }
         .container { max-width: 600px; margin: 0 auto; background: white; padding: 25px; border-radius: 10px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); }
         h2 { margin-top: 0; color: #e67e22; }
+        
+        .section-title { font-size: 0.9em; text-transform: uppercase; color: #888; margin-bottom: 10px; border-bottom: 1px solid #eee; padding-bottom: 5px; }
         .input-group { margin-bottom: 15px; }
+        
         label { display: block; margin-bottom: 5px; font-weight: 600; color: #555; }
         input { width: 100%; padding: 10px; box-sizing: border-box; border: 1px solid #ddd; border-radius: 5px; font-size: 14px; }
-        button { padding: 12px 20px; cursor: pointer; border: none; border-radius: 5px; font-size: 16px; margin-right: 10px; font-weight: bold; transition: background 0.2s; }
-        button:disabled { opacity: 0.6; cursor: not-allowed; }
         
-        #btn-connect { background-color: #3498db; color: white; }
-        #btn-dial { background-color: #2ecc71; color: white; }
-        #btn-hangup { background-color: #e74c3c; color: white; }
+        .controls { margin-top: 20px; margin-bottom: 20px; }
+        
+        button { padding: 12px 20px; cursor: pointer; border: none; border-radius: 5px; font-size: 16px; margin-right: 10px; font-weight: bold; transition: background 0.2s; color: white; }
+        
+        /* Button Variants */
+        .btn-primary { background-color: #3498db; } /* Connect */
+        .btn-primary:hover { background-color: #2980b9; }
+        .btn-primary:disabled { background-color: #bdc3c7; cursor: not-allowed; }
 
-        #output { margin-top: 25px; padding: 15px; background: #1e1e1e; color: #00ff00; height: 350px; overflow-y: auto; font-family: "Consolas", monospace; border-radius: 5px; font-size: 13px; line-height: 1.4; }
-        .status-bar { background: #ecf0f1; padding: 15px; border-radius: 8px; margin-bottom: 20px; border: 1px solid #bdc3c7; }
-        hr { border: 0; border-top: 1px solid #eee; margin: 25px 0; }
+        .btn-success { background-color: #2ecc71; } /* Answer/Dial */
+        .btn-success:hover { background-color: #27ae60; }
+        .btn-success:disabled { background-color: #bdc3c7; cursor: not-allowed; }
+
+        .btn-danger { background-color: #e74c3c; } /* Hangup */
+        .btn-danger:hover { background-color: #c0392b; }
+        .btn-danger:disabled { background-color: #bdc3c7; cursor: not-allowed; }
+
+        #status-log { background: #2c3e50; color: #ecf0f1; padding: 15px; border-radius: 5px; font-family: monospace; height: 150px; overflow-y: auto; font-size: 13px; }
+        
+        .hidden { display: none; }
     </style>
+    <script src="sip-0.21.2.min.js"></script>
 </head>
 <body>
 
 <div class="container">
-    <h2>🔥 AmpDialer</h2>
+    <h2>AmpDialer Softphone</h2>
 
-    <div class="status-bar">
-        <div class="input-group">
-            <label>Login ID (Extension@Domain)</label>
-            <input type="text" id="rl-username" placeholder="e.g. 101@291565" value="101@291565">
-        </div>
-        <div class="input-group">
-            <label>Password</label>
-            <input type="password" id="rl-password" placeholder="SIP Password">
-        </div>
-        <button id="btn-connect">Step 1: Connect</button>
+    <div class="section-title">Connection Settings</div>
+    
+    <div class="input-group">
+        <label for="serverAddress">Server Address (WebSocket)</label>
+        <input type="text" id="serverAddress" value="core2-mia.ringlogix.com:9002" placeholder="e.g. core2-mia.ringlogix.com:9002">
     </div>
-
-    <hr>
 
     <div class="input-group">
-        <label>Destination Number</label>
-        <input type="text" id="dest-number" placeholder="1234567890">
+        <label for="sipUri">Login ID (Extension@Domain)</label>
+        <input type="text" id="sipUri" placeholder="e.g. 101@291565"> 
     </div>
     
-    <div>
-        <button id="btn-dial" disabled>Step 2: Dial</button>
-        <button id="btn-hangup" disabled>Hangup</button>
+    <div class="input-group">
+        <label for="sipPassword">SIP Password</label>
+        <input type="password" id="sipPassword" placeholder="Enter SIP Password">
+    </div>
+    
+    <div class="controls">
+        <button id="btnConnect" class="btn-primary">Step 1: Connect</button>
     </div>
 
-    <div id="output"></div>
+    <div class="section-title">Call Controls</div>
+
+    <div class="input-group">
+        <label for="destNumber">Destination Number</label>
+        <input type="text" id="destNumber" placeholder="Enter number to dial...">
+    </div>
+
+    <div class="controls">
+        <button id="btnDial" class="btn-success" disabled>Step 2: Dial</button>
+        <button id="btnAnswer" class="btn-success hidden">📞 Answer Call</button>
+        <button id="btnHangup" class="btn-danger" disabled>Hangup</button>
+    </div>
+
+    <div id="status-log"></div>
+
     <audio id="remoteAudio" autoplay></audio>
 </div>
 
-<script src="sip-0.21.2.min.js"></script>
-
 <script>
-    // ============================================================
-    // 🛠️ RUNTIME PARSER PATCH (THE FIX)
-    // ============================================================
-    // This wrapper tricks the SIP.js parser into accepting "291565"
-    // by temporarily changing it to "291565.com" during validation.
-    if (window.SIP && SIP.Grammar) {
-        console.log("Applying Runtime Patch to SIP.Grammar...");
-        const originalParse = SIP.Grammar.parse;
-        
-        SIP.Grammar.parse = function(input, startRule) {
-            try {
-                // Try standard parsing first
-                return originalParse(input, startRule);
-            } catch (e) {
-                // If parsing fails, check if it's our numeric domain issue
-                if (typeof input === 'string' && input.includes('291565')) {
-                    // Create a fake valid domain
-                    const fakeInput = input.replace(/291565/g, '291565.com');
-                    try {
-                        const result = originalParse(fakeInput, startRule);
-                        
-                        // Fix the result (remove .com)
-                        if (result && result.host === '291565.com') result.host = '291565';
-                        if (result && result.uri && result.uri.host === '291565.com') result.uri.host = '291565';
-                        
-                        return result;
-                    } catch (e2) { throw e; } // If it still fails, throw original error
-                }
-                throw e;
-            }
-        };
-    } else {
-        alert("CRITICAL: SIP.js failed to load. Restore the original .js file!");
-    }
-
-    // ============================================================
-    // CONFIGURATION
-    // ============================================================
-    const WS_SERVER = "wss://core2-mia.ringlogix.com:9002"; 
-    const USER_AGENT_STRING = "SNAP.GO Webphone 44.2.2 (Chrome 143.0.0.0)";
-
-    // UI References
-    const outputDiv = document.getElementById("output");
-    const btnConnect = document.getElementById("btn-connect");
-    const btnDial = document.getElementById("btn-dial");
-    const btnHangup = document.getElementById("btn-hangup");
-    const inputLogin = document.getElementById("rl-username");
-    const inputPassword = document.getElementById("rl-password");
-    const inputDest = document.getElementById("dest-number");
+    // --- UI Elements ---
+    const btnConnect = document.getElementById("btnConnect");
+    const btnDial = document.getElementById("btnDial");
+    const btnHangup = document.getElementById("btnHangup");
+    const btnAnswer = document.getElementById("btnAnswer"); // New Button
+    const statusLog = document.getElementById("status-log");
     const remoteAudio = document.getElementById("remoteAudio");
 
-    let userAgent = null;
-    let registerer = null;
-    let currentSession = null;
+    // --- State Variables ---
+    let userAgent;
+    let currentSession;
 
-    function log(msg, type = "info") {
-        const timestamp = new Date().toLocaleTimeString();
-        const el = document.createElement("div");
-        el.innerText = `[${timestamp}] ${msg}`;
-        if (type === "error") el.style.color = "#ff6b6b"; 
-        if (type === "success") el.style.color = "#51cf66"; 
-        if (type === "warning") el.style.color = "#fcc419";
-        outputDiv.appendChild(el);
-        outputDiv.scrollTop = outputDiv.scrollHeight; 
-        console.log(msg);
+    // --- Helper: Logger ---
+    function log(msg) {
+        const time = new Date().toLocaleTimeString();
+        statusLog.innerHTML += `<div>[${time}] ${msg}</div>`;
+        statusLog.scrollTop = statusLog.scrollHeight;
+        console.log(`[AmpDialer] ${msg}`);
     }
 
-    // ============================================================
-    // CONNECT LOGIC
-    // ============================================================
+    // --- Step 1: Connect to PBX ---
     async function connectToPBX() {
-        const loginStr = inputLogin.value.trim(); 
-        const password = inputPassword.value.trim();
+        const serverAddress = document.getElementById("serverAddress").value.trim();
+        const sipUriInput = document.getElementById("sipUri").value.trim();
+        const password = document.getElementById("sipPassword").value.trim();
 
-        if (!loginStr || !password) return log("❌ Enter Login & Password", "error");
-
-        const parts = loginStr.split('@');
-        if (parts.length !== 2) return log("❌ Invalid Login Format", "error");
-
-        const userExt = parts[0].trim();       
-        const tenantDomain = parts[1].trim();  
-        const deviceUser = `${userExt}wp`; // 101wp
-
-        // Identity: sip:101wp@291565
-        const identityUri = `sip:${deviceUser}@${tenantDomain}`;
-        
-        log(`🔹 Identity: ${identityUri}`);
-
-        // Construct URI
-        let mySipUri;
-        try {
-            // Using the constructor directly (Patch handles the rest)
-            mySipUri = new SIP.URI("sip", deviceUser, tenantDomain);
-        } catch (e) {
-            log(`❌ URI Error: ${e}`, "error");
+        if (!serverAddress || !sipUriInput || !password) {
+            log("❌ Error: Please fill in Server, Login ID and Password.");
             return;
         }
 
-        userAgent = new SIP.UserAgent({
-            uri: mySipUri,
-            displayName: "AmpDialer",
-            
-            authorizationUsername: identityUri, 
-            authorizationPassword: password,
+        // Handle URI formatting (user typed '101@domain', we need 'sip:101@domain')
+        let fullUri = sipUriInput.startsWith("sip:") ? sipUriInput : `sip:${sipUriInput}`;
+        
+        // 1. Construct Dynamic WebSocket URL
+        const wsServerURL = `wss://${serverAddress}`;
+        log(`🔗 Connecting to ${wsServerURL} as ${fullUri}...`);
 
-            transportOptions: { server: WS_SERVER },
-            contactName: deviceUser,
-            hackIpInContact: true,
-            userAgentString: USER_AGENT_STRING,
-            logLevel: "debug"
+        // 2. Configure SIP User Agent
+        const transportOptions = {
+            server: wsServerURL
+        };
+
+        userAgent = new SIP.UserAgent({
+            transportConstructor: SIP.WebSocketTransport,
+            transportOptions: transportOptions,
+            uri: SIP.UserAgent.makeURI(fullUri),
+            authorizationUsername: fullUri.split("@")[0].replace("sip:", ""), // Extract extension
+            authorizationPassword: password,
+            delegate: {
+                onConnect: () => {
+                    log("✅ WebSocket Connected! Registering...");
+                },
+                onDisconnect: (error) => {
+                    log("❌ WebSocket Disconnected" + (error ? ": " + error : ""));
+                    resetUI();
+                },
+                onInvite: (invitation) => {
+                    handleIncomingCall(invitation);
+                }
+            }
         });
 
-        setupEventHandlers();
-
+        // 3. Start & Register
         try {
             await userAgent.start();
-            log("✅ SIP Agent Started. Connecting...", "info");
-            btnConnect.disabled = true;
-            btnConnect.innerText = "Connecting...";
-        } catch (err) {
-            log(`❌ Error starting SIP Agent: ${err}`, "error");
-            btnConnect.disabled = false;
+            // Create Registerer
+            const registerer = new SIP.Registerer(userAgent);
+            
+            // Setup Registration Listeners
+            registerer.stateChange.addListener((newState) => {
+                switch (newState) {
+                    case SIP.RegistererState.Registered:
+                        log("✅ DEVICE REGISTERED! READY TO CALL.");
+                        btnConnect.innerText = "Connected";
+                        btnConnect.disabled = true;
+                        btnDial.disabled = false;
+                        break;
+                    case SIP.RegistererState.Unregistered:
+                        log("⚠️ Unregistered.");
+                        break;
+                    case SIP.RegistererState.Terminated:
+                        log("⚠️ Registration Terminated.");
+                        break;
+                }
+            });
+
+            await registerer.register();
+
+        } catch (error) {
+            log("❌ Connection Failed: " + error);
+            console.error(error);
         }
     }
 
-    function setupEventHandlers() {
-        userAgent.transport.stateChange.addListener((state) => {
-            log(`📡 Transport State: ${state}`);
-            if (state === SIP.TransportState.Connected) {
-                log("✅ WebSocket Connected! Registering...", "success");
-                registerDevice();
-            } else if (state === SIP.TransportState.Disconnected) {
-                log("⚠️ WebSocket Disconnected", "error");
-                resetUI();
-            }
-        });
-
-        userAgent.delegate = {
-            onInvite: (invitation) => {
-                log("📞 Incoming Call...");
-                handleCallSession(invitation);
-            }
-        };
-    }
-
-    function registerDevice() {
-        registerer = new SIP.Registerer(userAgent);
-
-        registerer.stateChange.addListener((state) => {
-            log(`📝 Registration State: ${state}`);
-            
-            if (state === SIP.RegistererState.Registered) {
-                log("✅ DEVICE REGISTERED! READY TO CALL.", "success");
-                btnConnect.innerText = "Connected";
-                btnDial.disabled = false;
-                btnHangup.disabled = true;
-            } else if (state === SIP.RegistererState.Terminated) {
-                log("⚠️ Registration Terminated. Check Password.", "warning");
-            }
-        });
-
-        registerer.register()
-            .catch((error) => {
-                log(`❌ Registration Failed: ${error}`, "error");
-            });
-    }
-
+    // --- Step 2: Outbound Call ---
     async function makeCall() {
-        if (!userAgent || !userAgent.transport.isConnected()) return log("❌ Not Connected.", "error");
+        const dest = document.getElementById("destNumber").value.trim();
+        if (!dest) {
+            log("⚠️ Enter a number to dial.");
+            return;
+        }
+        if (!userAgent) {
+            log("⚠️ Not connected.");
+            return;
+        }
 
-        const dest = inputDest.value.trim();
-        if (!dest) return log("❌ Enter a number.", "error");
-
-        const tenantDomain = inputLogin.value.split('@')[1].trim();
+        const target = SIP.UserAgent.makeURI(`sip:${dest}@${userAgent.configuration.uri.host}`);
         log(`📞 Dialing ${dest}...`);
 
-        let target;
-        try {
-            target = new SIP.URI("sip", dest, tenantDomain);
-        } catch(e) {
-             // Fallback for dialing if constructor throws
-             target = SIP.UserAgent.makeURI(`sip:${dest}@${tenantDomain}`);
-        }
+        const inviter = new SIP.Inviter(userAgent, target);
+        
+        // Setup options (Audio Only)
+        const options = {
+            sessionDescriptionHandlerOptions: {
+                constraints: { audio: true, video: false }
+            }
+        };
 
-        const inviter = new SIP.Inviter(userAgent, target, {
-            sessionDescriptionHandlerOptions: { constraints: { audio: true, video: false } }
-        });
-
+        // Send Invite
+        await inviter.invite(options);
         handleCallSession(inviter);
-
-        inviter.invite().catch((e) => log(`❌ Invite Failed: ${e}`, "error"));
     }
 
+    // --- Step 3: Incoming Call Handling (FIXED) ---
+    function handleIncomingCall(invitation) {
+        log(`🔔 Incoming Call from ${invitation.remoteIdentity.uri.user}!`);
+        
+        // Show Answer Button
+        btnAnswer.classList.remove("hidden");
+        btnDial.disabled = true; // Prevent dialing while ringing
+
+        // Define Answer Action
+        btnAnswer.onclick = () => {
+            log("✅ Answering Call...");
+            invitation.accept({
+                sessionDescriptionHandlerOptions: {
+                    constraints: { audio: true, video: false }
+                }
+            });
+            handleCallSession(invitation);
+            btnAnswer.classList.add("hidden"); // Hide button after answer
+        };
+
+        // Handle if caller hangs up before we answer
+        invitation.stateChange.addListener((state) => {
+             if (state === SIP.SessionState.Terminated) {
+                 btnAnswer.classList.add("hidden");
+                 btnDial.disabled = false;
+                 log("❌ Call Cancelled by caller.");
+             }
+        });
+    }
+
+    // --- Common Call Session Handler (Audio & Events) ---
     function handleCallSession(session) {
         currentSession = session;
-        btnDial.disabled = true;
         btnHangup.disabled = false;
+        btnDial.disabled = true;
 
         session.stateChange.addListener((state) => {
-            log(`Call State: ${state}`);
+            log(`ℹ️ Session State: ${state}`);
+            
             if (state === SIP.SessionState.Established) {
-                log("🗣️ Call Connected!", "success");
+                log("🗣️ Call Connected! Audio active.");
                 setupRemoteMedia(session);
-            } else if (state === SIP.SessionState.Terminated) {
-                log("Call Ended");
+            } 
+            else if (state === SIP.SessionState.Terminated) {
+                log("⏹️ Call Ended");
                 cleanupCall();
             }
         });
     }
 
+    // --- Audio Routing ---
     function setupRemoteMedia(session) {
         const remoteStream = new MediaStream();
         session.sessionDescriptionHandler.peerConnection.getReceivers().forEach((receiver) => {
-            if (receiver.track) remoteStream.addTrack(receiver.track);
+            if (receiver.track) {
+                remoteStream.addTrack(receiver.track);
+            }
         });
         remoteAudio.srcObject = remoteStream;
-        remoteAudio.play().catch(e => log("⚠️ Click page to enable audio"));
+        remoteAudio.play().catch(e => log("⚠️ Autoplay blocked: Click page to enable audio"));
     }
 
+    // --- Cleanup & Reset ---
     function cleanupCall() {
         currentSession = null;
         btnDial.disabled = false;
         btnHangup.disabled = true;
+        btnAnswer.classList.add("hidden"); // Ensure answer button is gone
     }
 
     function hangupCall() {
         if (!currentSession) return;
-        if (currentSession.state === SIP.SessionState.Established) currentSession.bye();
-        else if (currentSession.state === SIP.SessionState.Establishing) currentSession.cancel();
+        
+        // If established, send BYE. If ringing/connecting, send CANCEL.
+        if (currentSession.state === SIP.SessionState.Established) {
+            currentSession.bye();
+        } else if (currentSession.state === SIP.SessionState.Establishing) {
+            currentSession.cancel();
+        }
     }
 
     function resetUI() {
@@ -295,11 +293,14 @@
         btnConnect.innerText = "Step 1: Connect";
         btnDial.disabled = true;
         btnHangup.disabled = true;
+        btnAnswer.classList.add("hidden");
     }
 
+    // --- Event Listeners ---
     btnConnect.addEventListener("click", connectToPBX);
     btnDial.addEventListener("click", makeCall);
     btnHangup.addEventListener("click", hangupCall);
+
 </script>
 </body>
 </html>
