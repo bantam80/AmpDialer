@@ -2,258 +2,295 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Zoho Power Dialer</title>
-    
-    <script src="sip-0.21.2.min.js"></script>
-    
-    <script src="https://live.zwidgets.com/js-sdk/1.1/ZohoEmbededAppSDK.min.js"></script>
-    
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Hammer Console - SIP Dialer</title>
     <style>
-        :root { --primary: #007bff; --success: #28a745; --bg: #f8f9fa; }
-        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: var(--bg); padding: 20px; }
-        .card { background: white; padding: 25px; border-radius: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.05); max-width: 400px; margin: 0 auto; }
-        .hidden { display: none !important; }
-        input { width: 100%; padding: 10px; margin: 10px 0; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box;}
-        button { width: 100%; padding: 12px; background: var(--primary); color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; }
-        button:hover { opacity: 0.9; }
-        .status-bar { text-align: center; margin-bottom: 15px; font-size: 0.9em; color: #666; }
-        .led { display: inline-block; width: 10px; height: 10px; border-radius: 50%; background: #ccc; margin-right: 5px; }
-        .led.on { background: var(--success); }
-        .lead-row { display: flex; justify-content: space-between; padding: 10px; border-bottom: 1px solid #eee; }
-        .lead-row.active { background: #e3f2fd; border-left: 4px solid var(--primary); }
+        body { font-family: sans-serif; padding: 20px; background-color: #f4f4f9; }
+        .container { max-width: 600px; margin: 0 auto; background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+        .input-group { margin-bottom: 15px; }
+        label { display: block; margin-bottom: 5px; font-weight: bold; }
+        input { width: 100%; padding: 8px; box-sizing: border-box; border: 1px solid #ccc; border-radius: 4px; }
+        button { padding: 10px 15px; cursor: pointer; border: none; border-radius: 4px; font-size: 16px; margin-right: 10px; }
+        #btn-connect { background-color: #007bff; color: white; }
+        #btn-connect:disabled { background-color: #ccc; }
+        #btn-dial { background-color: #28a745; color: white; }
+        #btn-hangup { background-color: #dc3545; color: white; }
+        #output { margin-top: 20px; padding: 10px; background: #222; color: #0f0; height: 300px; overflow-y: auto; font-family: monospace; border-radius: 4px; }
+        .status-bar { margin-bottom: 20px; padding: 10px; background: #e9ecef; border-radius: 4px; }
     </style>
 </head>
 <body>
 
-    <div id="login-screen" class="card">
-        <h2 style="text-align:center;">🔌 Connect Phone</h2>
-        <div id="login-error" style="color:red; font-size:0.8em; text-align:center;"></div>
-        <input type="text" id="rl-username" placeholder="RingLogix Username (user@domain.com)">
-        <input type="password" id="rl-password" placeholder="Password">
-        <button onclick="handleLogin()">Login & Initialize</button>
+<div class="container">
+    <h2>Hammer Console (WebPhone)</h2>
+
+    <div class="status-bar">
+        <div class="input-group">
+            <label>Login ID (Extension@Domain)</label>
+            <input type="text" id="rl-username" placeholder="e.g. 101@291565" value="101@291565">
+        </div>
+        <div class="input-group">
+            <label>Password</label>
+            <input type="password" id="rl-password" placeholder="SIP Password">
+        </div>
+        <button id="btn-connect">Step 1: Connect & Register</button>
     </div>
 
-    <div id="dialer-screen" class="card hidden">
-        <div class="status-bar"><span id="sip-led" class="led"></span> <span id="sip-status">Connecting...</span></div>
-        
-        <div id="leads-list">
-            </div>
+    <hr>
 
-        <div style="margin-top:20px; display:flex; gap:10px;">
-            <button onclick="startPowerDialer()" style="background:var(--success)">Start Dialing</button>
-            <button onclick="stopPowerDialer()" style="background:#dc3545">Stop</button>
-        </div>
-        
-        <div style="margin-top:10px;">
-            <input type="text" id="manual-dial" placeholder="Or enter number manually...">
-            <button onclick="manualCall()" style="background:#6c757d; margin-top:0;">Call</button>
-        </div>
+    <div class="input-group">
+        <label>Destination Number</label>
+        <input type="text" id="dest-number" placeholder="1234567890">
     </div>
+    
+    <div>
+        <button id="btn-dial">Step 2: Dial</button>
+        <button id="btn-hangup">Hangup</button>
+    </div>
+
+    <div id="output"></div>
+    
+    <audio id="remoteAudio" autoplay></audio>
+</div>
+
+<script src="sip-0.21.2.min.js"></script>
 
 <script>
-    /* =========================================
-       CONFIGURATION
-       ========================================= */
-    const CONFIG = {
-        authProxyUrl: 'https://ampdialer.onrender.com/auth/login', 
-        apiBase: 'https://pbx.simplelogin.net/ns-api/v2' 
-    };
+    // ============================================================
+    // CONFIGURATION & GLOBAL VARIABLES
+    // ============================================================
+    // The WebSocket server found in your logs
+    const WS_SERVER = "wss://core2-mia.ringlogix.com:9002"; 
 
-    let userAgent; 
-    let isDialing = false;
+    // UI References
+    const outputDiv = document.getElementById("output");
+    const btnConnect = document.getElementById("btn-connect");
+    const btnDial = document.getElementById("btn-dial");
+    const btnHangup = document.getElementById("btn-hangup");
+    const inputLogin = document.getElementById("rl-username");
+    const inputPassword = document.getElementById("rl-password");
+    const inputDest = document.getElementById("dest-number");
+    const remoteAudio = document.getElementById("remoteAudio");
 
-    // Mock Leads
-    const leads = [
-        { Name: 'Bartow Industries', Phone: '17705550101' },
-        { Name: 'Cartersville Paving', Phone: '17705550102' }
-    ];
+    let userAgent = null;
+    let currentSession = null;
 
-    /* =========================================
-       PART 1: AUTHENTICATION
-       ========================================= */
-    async function handleLogin() {
-        if (typeof SIP === 'undefined') {
-            alert("Error: SIP.js library not loaded. Check filename in index.html");
-            return;
-        }
-
-        const fullUsername = document.getElementById('rl-username').value.trim();
-        const pass = document.getElementById('rl-password').value;
-        const btn = document.querySelector('button');
-        const err = document.getElementById('login-error');
+    // ============================================================
+    // LOGGING HELPER
+    // ============================================================
+    function log(msg, type = "info") {
+        const timestamp = new Date().toLocaleTimeString();
+        const el = document.createElement("div");
+        el.innerText = `[${timestamp}] ${msg}`;
         
-        btn.innerText = "Authenticating...";
-        err.innerText = "";
+        if (type === "error") el.style.color = "#ff4d4d"; // Red
+        if (type === "success") el.style.color = "#4dff4d"; // Green
+        
+        outputDiv.appendChild(el);
+        outputDiv.scrollTop = outputDiv.scrollHeight; // Auto-scroll
+        console.log(msg);
+    }
 
-        if (!fullUsername.includes('@')) {
-            err.innerText = "Please use full format: user@domain.com";
-            btn.innerText = "Login & Initialize";
+    // ============================================================
+    // STEP 1: DYNAMIC CONNECTION (THE FIX)
+    // ============================================================
+    async function connectToPBX() {
+        const loginStr = inputLogin.value.trim(); // e.g., "101@291565"
+        const password = inputPassword.value.trim();
+
+        if (!loginStr || !password) {
+            log("❌ Please enter Login ID and Password.", "error");
             return;
         }
-        const [userPart, domainPart] = fullUsername.split('@');
+
+        // --- DYNAMIC LOGIC START ---
+        // 1. Parse "101@291565"
+        const parts = loginStr.split('@');
+        if (parts.length !== 2) {
+            log("❌ Invalid Login Format. Must be: Ext@Domain (e.g., 101@291565)", "error");
+            return;
+        }
+
+        const userExt = parts[0];       // "101"
+        const tenantDomain = parts[1];  // "291565"
+        
+        // 2. Add 'wp' suffix for the WebPhone device ID
+        const deviceUser = `${userExt}wp`; // "101wp"
+
+        log(`🔹 User Ext: ${userExt}`);
+        log(`🔹 Domain: ${tenantDomain}`);
+        log(`🔹 Device Identity: ${deviceUser}`);
+
+        // 3. Create the SIP URI using the Tenant Domain
+        // This fixes the "403 Forbidden" by matching the server's expected tenant.
+        const mySipUri = SIP.UserAgent.makeURI(`sip:${deviceUser}@${tenantDomain}`);
+
+        if (!mySipUri) {
+            log("❌ Failed to create valid SIP URI.", "error");
+            return;
+        }
+        // --- DYNAMIC LOGIC END ---
+
+        log(`🚀 Initializing SIP Agent for: ${mySipUri.toString()}`);
+
+        userAgent = new SIP.UserAgent({
+            uri: mySipUri,
+            displayName: "Hammer Console",
+            
+            // Auth using the "wp" username
+            authorizationUsername: deviceUser, 
+            authorizationPassword: password,
+
+            transportOptions: {
+                server: WS_SERVER
+            },
+            
+            register: true, // Register so we can receive calls too
+            contactName: deviceUser,
+            logLevel: "error" // Keep console clean, change to "log" for debug
+        });
+
+        setupEventHandlers();
 
         try {
-            // A. GET TOKEN
-            console.log("Step A: Requesting Token...");
-            const authRes = await fetch(CONFIG.authProxyUrl, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ username: fullUsername, password: pass })
-            });
-
-            if (!authRes.ok) throw new Error("Login failed. Check credentials.");
-            const authData = await authRes.json();
-            
-            // B. DISCOVER DEVICES
-            console.log("Step B: Looking up Devices...");
-            const explicitUrl = `${CONFIG.apiBase}/domains/${domainPart}/users/${userPart}/devices`;
-            
-            const devicesRes = await fetch(explicitUrl, {
-                method: 'GET',
-                headers: { 'Authorization': `Bearer ${authData.access_token}` }
-            });
-
-            if (!devicesRes.ok) throw new Error(`Phone Lookup Failed (${devicesRes.status})`);
-            
-            let devices = await devicesRes.json();
-            if (!Array.isArray(devices)) devices = [devices];
-
-            // C. FIND MATCHING DEVICE
-            let targetDevice = devices.find(d => d['device-sip-registration-password']);
-            
-            if (!targetDevice) {
-                console.warn("No device with registration password found, checking fallback...");
-                targetDevice = devices[0];
-            }
-
-            if (!targetDevice) throw new Error("No SIP devices found.");
-
-            // D. EXTRACT CREDENTIALS
-            const sipUser = targetDevice.device; 
-            const sipPass = targetDevice['device-sip-registration-password'];
-            
-            if (!sipUser || !sipPass) {
-                console.error("Device Data:", targetDevice);
-                throw new Error("Device found, but missing credentials.");
-            }
-
-            // E. INITIALIZE
-            console.log(`Initializing SIP: ${sipUser} @ ${domainPart}`);
-            initializeSoftphone(sipUser, sipPass, domainPart);
-            
-            document.getElementById('login-screen').classList.add('hidden');
-            document.getElementById('dialer-screen').classList.remove('hidden');
-            renderLeads();
-
-        } catch (e) {
-            console.error(e);
-            err.innerText = e.message;
-            btn.innerText = "Login & Initialize";
+            await userAgent.start();
+            log("✅ SIP Agent Started. Connecting...", "success");
+        } catch (err) {
+            log(`❌ Error starting SIP Agent: ${err}`, "error");
         }
     }
 
-    /* =========================================
-       PART 2: SIP.JS (THE SOFTPHONE)
-       ========================================= */
-    function initializeSoftphone(sipUser, sipPass, domain) {
-        // 👇 CORRECT SERVER: Use the first 'Core' server from your scrape
-        const transportOptions = {
-            server: 'wss://core2-mia.ringlogix.com:9002'
-        };
-
-        console.log(`🔌 Connecting to WebSocket: ${transportOptions.server}`);
-
-        const uri = SIP.UserAgent.makeURI(`sip:${sipUser}@${domain}`);
+    // ============================================================
+    // EVENT HANDLERS
+    // ============================================================
+    function setupEventHandlers() {
+        // WebSocket State
+        userAgent.transport.on("connected", () => {
+            log("✅ WebSocket Connected!", "success");
+        });
         
-        userAgent = new SIP.UserAgent({
-            uri: uri,
-            transportOptions: transportOptions,
-            authorizationUsername: sipUser,
-            authorizationPassword: sipPass,
-            // These flags help with firewalls and keep connections alive
-            hackViaTcp: true, 
-            delegate: {
-                onConnect: () => {
-                    console.log("✅ SIP Connected!");
-                    document.getElementById('sip-led').classList.add('on');
-                    document.getElementById('sip-status').innerText = "Phone Ready";
-                },
-                onDisconnect: (error) => {
-                    console.warn("❌ SIP Disconnected:", error);
-                    document.getElementById('sip-led').classList.remove('on');
-                    document.getElementById('sip-status').innerText = "Disconnected";
+        userAgent.transport.on("disconnected", () => {
+            log("⚠️ WebSocket Disconnected", "error");
+            btnConnect.disabled = false;
+            btnConnect.innerText = "Step 1: Connect & Register";
+        });
+
+        // Registration State
+        userAgent.on("registered", () => {
+            log("✅ Registered! Ready to make calls.", "success");
+            btnConnect.disabled = true;
+            btnConnect.innerText = "Connected";
+        });
+
+        userAgent.on("registrationFailed", (response) => {
+            log(`❌ Registration Failed: ${response.cause}`, "error");
+        });
+
+        // Incoming Call Handling
+        userAgent.on("invite", (invitation) => {
+            log("📞 Incoming Call...");
+            currentSession = invitation;
+            
+            // Auto-accept for testing (or add a button to accept)
+            // invitation.accept(); 
+            
+            // Handle cleanup when call ends
+            invitation.stateChange.addListener((state) => {
+                if (state === SIP.SessionState.Terminated) {
+                    log("Call Ended");
+                    currentSession = null;
                 }
+            });
+        });
+    }
+
+    // ============================================================
+    // STEP 2: DIALING
+    // ============================================================
+    async function makeCall() {
+        if (!userAgent || !userAgent.transport.isConnected()) {
+            log("❌ Error: Not Connected.", "error");
+            return;
+        }
+
+        const dest = inputDest.value.trim();
+        if (!dest) {
+            log("❌ Error: Enter a destination number.", "error");
+            return;
+        }
+
+        log(`📞 Dialing ${dest}...`);
+
+        // Create target URI. We can use the WS_SERVER domain or the Login domain.
+        // Usually, the server handles routing just fine if we send sip:NUMBER@DOMAIN
+        // We use the tenant domain parsed from the login input.
+        const tenantDomain = inputLogin.value.split('@')[1];
+        const target = SIP.UserAgent.makeURI(`sip:${dest}@${tenantDomain}`);
+
+        const inviter = new SIP.Inviter(userAgent, target, {
+            sessionDescriptionHandlerOptions: {
+                constraints: { audio: true, video: false }
             }
         });
 
-        userAgent.start()
-            .then(() => console.log("User Agent Started"))
-            .catch(e => console.error("User Agent Failed:", e));
-    }
+        currentSession = inviter;
 
-    /* =========================================
-       PART 3: DIALER LOGIC
-       ========================================= */
-    function renderLeads() {
-        const list = document.getElementById('leads-list');
-        list.innerHTML = leads.map((l, i) => 
-            `<div class="lead-row" id="row-${i}">
-                <span>${l.Name}</span>
-                <small>${l.Phone}</small>
-             </div>`
-        ).join('');
-    }
-
-    async function startPowerDialer() {
-        isDialing = true;
-        for (let i = 0; i < leads.length; i++) {
-            if (!isDialing) break;
+        // Monitor Call State
+        inviter.stateChange.addListener((state) => {
+            log(`Call State: ${state}`);
             
-            document.querySelectorAll('.lead-row').forEach(r => r.classList.remove('active'));
-            document.getElementById(`row-${i}`).classList.add('active');
-            
-            await placeCall(leads[i].Phone);
-            await new Promise(r => setTimeout(r, 5000));
-        }
-    }
-
-    function stopPowerDialer() { isDialing = false; }
-
-    async function manualCall() {
-        const num = document.getElementById('manual-dial').value;
-        if(num) placeCall(num);
-    }
-
-    function placeCall(number) {
-        return new Promise((resolve) => {
-            if (!userAgent) { alert("Phone not initialized!"); return; }
-
-            console.log("Dialing:", number);
-            document.getElementById('sip-status').innerText = `Dialing ${number}...`;
-            
-            const target = SIP.UserAgent.makeURI(`sip:${number}@${userAgent.configuration.uri.host}`);
-            if (!target) { console.error("Invalid URI"); return; }
-
-            const inviter = new SIP.Inviter(userAgent, target);
-            
-            inviter.stateChange.addListener((state) => {
-                console.log("Call State:", state);
-                if (state === SIP.SessionState.Terminated) {
-                    document.getElementById('sip-status').innerText = "Call Ended";
-                    resolve(); 
-                }
-            });
-
-            inviter.invite()
-                .then(() => console.log("Invite Sent"))
-                .catch((e) => {
-                    console.error("Invite Failed", e);
-                    document.getElementById('sip-status').innerText = "Call Failed";
-                });
+            switch (state) {
+                case SIP.SessionState.Establishing:
+                    log("🔔 Ringing...");
+                    break;
+                case SIP.SessionState.Established:
+                    log("🗣️ Call Connected!", "success");
+                    setupRemoteMedia(inviter);
+                    break;
+                case SIP.SessionState.Terminated:
+                    log("Call Ended");
+                    currentSession = null;
+                    break;
+            }
         });
+
+        // Send the Invite
+        inviter.invite()
+            .then(() => log("Invite Sent"))
+            .catch((e) => log(`❌ Invite Failed: ${e}`, "error"));
     }
 
-    ZOHO.embeddedApp.init();
+    // ============================================================
+    // MEDIA & HANGUP
+    // ============================================================
+    function setupRemoteMedia(session) {
+        const remoteStream = new MediaStream();
+        session.sessionDescriptionHandler.peerConnection.getReceivers().forEach((receiver) => {
+            if (receiver.track) {
+                remoteStream.addTrack(receiver.track);
+            }
+        });
+        remoteAudio.srcObject = remoteStream;
+        remoteAudio.play().catch(e => log("⚠️ Audio Play Error: Click the page to allow audio."));
+    }
+
+    function hangupCall() {
+        if (!currentSession) return;
+
+        if (currentSession.state === SIP.SessionState.Established) {
+            currentSession.bye();
+        } else if (currentSession.state === SIP.SessionState.Establishing) {
+            currentSession.cancel();
+        }
+        currentSession = null;
+        log("Hangup requested.");
+    }
+
+    // Listeners
+    btnConnect.addEventListener("click", connectToPBX);
+    btnDial.addEventListener("click", makeCall);
+    btnHangup.addEventListener("click", hangupCall);
+
 </script>
 </body>
 </html>
