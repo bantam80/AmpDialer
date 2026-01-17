@@ -72,7 +72,6 @@
        PART 1: AUTHENTICATION
        ========================================= */
     async function handleLogin() {
-        // Double check library loaded
         if (typeof SIP === 'undefined') {
             alert("Error: SIP.js library not loaded. Check filename in index.html");
             return;
@@ -120,7 +119,6 @@
             if (!Array.isArray(devices)) devices = [devices];
 
             // C. FIND MATCHING DEVICE
-            // Finds the device with the hidden system password
             let targetDevice = devices.find(d => d['device-sip-registration-password']);
             
             if (!targetDevice) {
@@ -158,8 +156,12 @@
        PART 2: SIP.JS (THE SOFTPHONE)
        ========================================= */
     function initializeSoftphone(sipUser, sipPass, domain) {
+        // 👇 FIX: Extract the actual hostname (pbx.simplelogin.net) from the API URL
+        const pbxHost = new URL(CONFIG.apiBase).hostname;
+
         const transportOptions = {
-            server: `wss://${domain}:8089` 
+            // We connect to the PBX Hostname, NOT the numeric Domain ID
+            server: `wss://${pbxHost}:8089` 
         };
 
         const uri = SIP.UserAgent.makeURI(`sip:${sipUser}@${domain}`);
