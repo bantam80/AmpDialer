@@ -69,22 +69,18 @@
     ];
 
     /* =========================================
-       PART 1: AUTHENTICATION
+       PART 1: AUTHENTICATION (Diagnostic Mode)
        ========================================= */
     async function handleLogin() {
         const fullUsername = document.getElementById('rl-username').value.trim();
         const pass = document.getElementById('rl-password').value;
+        
+        // ... (Clear errors and UI updates) ...
         const btn = document.querySelector('button');
         const err = document.getElementById('login-error');
-        
         btn.innerText = "Authenticating...";
         err.innerText = "";
-
-        if (!fullUsername.includes('@')) {
-            err.innerText = "Please use full format: user@domain.com";
-            btn.innerText = "Login & Initialize";
-            return;
-        }
+        
         const [userPart, domainPart] = fullUsername.split('@');
 
         try {
@@ -99,7 +95,7 @@
             if (!authRes.ok) throw new Error("Login failed. Check credentials.");
             const authData = await authRes.json();
             
-            // B. DISCOVER DEVICE (Just to get the username)
+            // B. DISCOVER DEVICES
             console.log("Step B: Looking up Devices...");
             const explicitUrl = `${CONFIG.apiBase}/domains/${domainPart}/users/${userPart}/devices`;
             
@@ -113,7 +109,7 @@
             let devices = await devicesRes.json();
             if (!Array.isArray(devices)) devices = [devices];
 
-            // C. SELECT DEVICE (Look for 'wp' first)
+            // C. SELECT DEVICE (Try 'wp', fallback to first)
             let targetDevice = devices.find(d => d.device && d.device.includes('wp@'));
             
             if (!targetDevice) {
@@ -123,15 +119,23 @@
 
             if (!targetDevice) throw new Error("No SIP devices found for this user.");
 
-            // D. PARSE SIP USERNAME
-            let sipUser = targetDevice.sip_username || targetDevice.username;
+            // 🚨 DIAGNOSTIC: PRINT THE DEVICE WE FOUND 🚨
+            console.log("--- DIAGNOSTIC: TARGET DEVICE ---");
+            console.log(JSON.stringify(targetDevice, null, 2)); // <--- CHECK THIS IN CONSOLE
+            console.log("---------------------------------");
+
+            // D. PARSE SIP USERNAME (Updated Logic)
+            let sipUser = targetDevice.sip_username || 
+                          targetDevice.username || 
+                          targetDevice.subscriber_name;
             
+            // Regex Fallback
             if (!sipUser && targetDevice.device) {
                 const match = targetDevice.device.match(/sip:(.*?)@/);
                 if (match) sipUser = match[1];
             }
             
-            if (!sipUser) throw new Error("Could not determine SIP Username.");
+            if (!sipUser) throw new Error("Could not determine SIP Username. See Diagnostic log.");
 
             // E. INITIALIZE
             console.log(`Initializing SIP with User: ${sipUser} @ ${domainPart}`);
