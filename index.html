@@ -8,17 +8,13 @@
         body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; padding: 20px; background-color: #f4f4f9; color: #333; }
         .container { max-width: 600px; margin: 0 auto; background: white; padding: 25px; border-radius: 10px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); }
         h2 { margin-top: 0; color: #e67e22; }
-        
         .section-title { font-size: 0.9em; text-transform: uppercase; color: #888; margin-bottom: 10px; border-bottom: 1px solid #eee; padding-bottom: 5px; }
         .input-group { margin-bottom: 15px; }
         .half-width { display: flex; gap: 10px; }
         .half-width > div { flex: 1; }
-        
         label { display: block; margin-bottom: 5px; font-weight: 600; color: #555; }
         input { width: 100%; padding: 10px; box-sizing: border-box; border: 1px solid #ddd; border-radius: 5px; font-size: 14px; }
-        
         .controls { margin-top: 20px; margin-bottom: 20px; }
-        
         button { padding: 12px 20px; cursor: pointer; border: none; border-radius: 5px; font-size: 16px; margin-right: 10px; font-weight: bold; transition: background 0.2s; color: white; }
         
         .btn-primary { background-color: #3498db; } 
@@ -71,12 +67,10 @@
     </div>
 
     <div class="section-title">Call Controls</div>
-
     <div class="input-group">
         <label for="destNumber">Destination Number</label>
         <input type="text" id="destNumber" placeholder="Enter number to dial...">
     </div>
-
     <div class="controls">
         <button id="btnDial" class="btn-success" disabled>Step 2: Dial</button>
         <button id="btnAnswer" class="btn-success hidden">📞 Answer Call</button>
@@ -105,7 +99,6 @@
         console.log(`[AmpDialer] ${msg}`);
     }
 
-    // --- Step 1: Connect to PBX ---
     async function connectToPBX() {
         const server = document.getElementById("serverAddress").value.trim();
         const ext = document.getElementById("sipExt").value.trim();
@@ -117,30 +110,23 @@
             return;
         }
 
-        // --- TRICK FOR NUMERIC DOMAINS ---
-        // 1. We construct the URI using the SERVER address (which has dots, so SIP.js accepts it)
-        const uriString = `sip:${ext}@${server}`;
+        // --- INTERNAL URI (For SIP.js Validation Only) ---
+        // We use the Server Address here so SIP.js thinks it's valid
+        const internalUri = `sip:${ext}@${server}`;
+        const targetURI = SIP.UserAgent.makeURI(internalUri);
         
-        // 2. We construct the Auth Username using the DOMAIN (which Netsapiens expects)
-        const authUser = `${ext}@${domain}`;
-
-        const targetURI = SIP.UserAgent.makeURI(uriString);
-        if (!targetURI) {
-            log(`❌ Critical Error: SIP.js refused to parse URI: ${uriString}`);
-            return;
-        }
+        // --- REAL IDENTITY (For The PBX) ---
+        // We will force these into the headers manually later
+        const realIdentity = `sip:${ext}@${domain}`;
 
         const wsServerURL = `wss://${server}`;
         log(`🔗 Connecting to ${wsServerURL}...`);
-        log(`👤 Identity: ${uriString} | Auth: ${authUser}`);
-
-        const transportOptions = { server: wsServerURL };
 
         userAgent = new SIP.UserAgent({
             transportConstructor: SIP.WebSocketTransport,
-            transportOptions: transportOptions,
+            transportOptions: { server: wsServerURL },
             uri: targetURI,
-            authorizationUsername: authUser, // <--- This authenticates you correctly!
+            authorizationUsername: `${ext}@${domain}`, // Valid Auth User
             authorizationPassword: password,
             delegate: {
                 onConnect: () => log("✅ WebSocket Connected! Registering..."),
@@ -154,7 +140,25 @@
 
         try {
             await userAgent.start();
+            
             const registerer = new SIP.Registerer(userAgent);
+
+            // --- HEADER OVERRIDE HACK ---
+            // This forces the To/From headers to use your Numeric Domain (291565)
+            // Bypassing SIP.js strict validation
+            const registerOptions = {
+                requestDelegate: {
+                    onSend: (request) => {
+                        // Keep the existing Tag, just swap the URI
+                        let currentFrom = request.message.getHeader('From');
+                        let tag = currentFrom.split(';tag=')[1]; 
+                        
+                        log(`🛠️ Overwriting Headers to: ${realIdentity}`);
+                        request.message.setHeader('To', `<${realIdentity}>`);
+                        request.message.setHeader('From', `<${realIdentity}>;tag=${tag}`);
+                    }
+                }
+            };
             
             registerer.stateChange.addListener((newState) => {
                 switch (newState) {
@@ -175,31 +179,45 @@
                 }
             });
 
-            await registerer.register();
+            // Pass our options with the header hack
+            await registerer.register(registerOptions);
+
         } catch (error) {
             log("❌ Connection Failed: " + error);
         }
     }
 
-    // --- Step 2: Outbound Call ---
     async function makeCall() {
         const dest = document.getElementById("destNumber").value.trim();
         if (!dest || !userAgent) return;
 
-        // Dialing URI: sip:number@server (standard behavior)
+        // Use the SERVER domain for target URI to ensure parsing succeeds
+        // The PBX usually routes this correctly if it's just a number
         const target = SIP.UserAgent.makeURI(`sip:${dest}@${userAgent.configuration.uri.host}`);
         log(`📞 Dialing ${dest}...`);
 
         const inviter = new SIP.Inviter(userAgent, target);
-        const options = {
-            sessionDescriptionHandlerOptions: { constraints: { audio: true, video: false } }
+        
+        // Apply the same Header Hack to Invites so Outbound calls work too
+        const ext = document.getElementById("sipExt").value.trim();
+        const domain = document.getElementById("sipDomain").value.trim();
+        const realIdentity = `sip:${ext}@${domain}`;
+
+        const inviteOptions = {
+            sessionDescriptionHandlerOptions: { constraints: { audio: true, video: false } },
+            requestDelegate: {
+                onSend: (request) => {
+                     let currentFrom = request.message.getHeader('From');
+                     let tag = currentFrom.split(';tag=')[1];
+                     request.message.setHeader('From', `<${realIdentity}>;tag=${tag}`);
+                }
+            }
         };
 
-        await inviter.invite(options);
+        await inviter.invite(inviteOptions);
         handleCallSession(inviter);
     }
 
-    // --- Step 3: Incoming Call Handling ---
     function handleIncomingCall(invitation) {
         log(`🔔 Incoming Call from ${invitation.remoteIdentity.uri.user}!`);
         btnAnswer.classList.remove("hidden");
@@ -223,7 +241,6 @@
         });
     }
 
-    // --- Call Session Logic ---
     function handleCallSession(session) {
         currentSession = session;
         btnHangup.disabled = false;
