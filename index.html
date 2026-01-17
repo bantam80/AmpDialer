@@ -92,7 +92,7 @@
     }
 
     // ============================================================
-    // STEP 1: CONNECT & REGISTER
+    // STEP 1: CONNECT & REGISTER (FINAL FIX)
     // ============================================================
     async function connectToPBX() {
         const loginStr = inputLogin.value.trim(); 
@@ -114,18 +114,26 @@
         const tenantDomain = parts[1].trim();  
         const deviceUser = `${userExt}wp`; // Adds "wp" suffix
         
-        // 2. GENERATE URI 
-        // We use 'ringlogix.com' because SIP.js rejects numeric domains like '291565'.
-        // The server will identify us via the 'authorizationUsername' (101wp) anyway.
-        const uriString = `sip:${deviceUser}@ringlogix.com`;
-        const mySipUri = SIP.UserAgent.makeURI(uriString);
+        log(`🔹 User: ${deviceUser}`);
+        log(`🔹 Domain: ${tenantDomain}`);
 
-        if (!mySipUri) {
-            log(`❌ CRITICAL: Could not generate URI from '${uriString}'`, "error");
-            return;
+        // 2. GENERATE URI (BYPASSING PARSER)
+        // strict 'makeURI' fails on "291565", so we use the Constructor directly.
+        let mySipUri;
+        try {
+            // new SIP.URI(scheme, user, host, port, parameters, headers)
+            mySipUri = new SIP.URI("sip", deviceUser, tenantDomain);
+        } catch (e) {
+            log(`⚠️ URI Constructor failed: ${e}`, "error");
         }
 
-        log(`🚀 Config: URI=${mySipUri.toString()}, AuthUser=${deviceUser}`);
+        if (!mySipUri) {
+            // Fallback just in case
+            log("⚠️ Manual URI creation failed. Trying fallback...", "error");
+            mySipUri = SIP.UserAgent.makeURI(`sip:${deviceUser}@ringlogix.com`);
+        }
+
+        log(`🚀 Identity Created: ${mySipUri.toString()}`);
 
         // 3. CONFIGURE USER AGENT
         userAgent = new SIP.UserAgent({
@@ -145,7 +153,7 @@
             logLevel: "error"
         });
 
-        // 4. SETUP EVENTS (Fixed for v0.21)
+        // 4. SETUP EVENTS
         setupEventHandlers();
 
         // 5. START
@@ -156,40 +164,6 @@
             log(`❌ Error starting SIP Agent: ${err}`, "error");
         }
     }
-
-    function setupEventHandlers() {
-        // Transport State (WebSocket)
-        userAgent.transport.stateChange.addListener((state) => {
-            log(`📡 Transport State: ${state}`);
-            
-            if (state === SIP.TransportState.Connected) {
-                log("✅ WebSocket Connected! Attempting Registration...", "success");
-                registerDevice();
-            } else if (state === SIP.TransportState.Disconnected) {
-                log("⚠️ WebSocket Disconnected", "error");
-                btnConnect.disabled = false;
-                btnConnect.innerText = "Step 1: Connect & Register";
-            }
-        });
-
-        // Incoming Call Handling
-        userAgent.delegate = {
-            onInvite: (invitation) => {
-                log("📞 Incoming Call...");
-                currentSession = invitation;
-                
-                // Monitor the incoming session
-                invitation.stateChange.addListener((state) => {
-                    log(`Incoming Call State: ${state}`);
-                    if (state === SIP.SessionState.Terminated) {
-                        log("Call Ended");
-                        currentSession = null;
-                    }
-                });
-            }
-        };
-    }
-
     // ============================================================
     // REGISTRATION (Required for v0.21)
     // ============================================================
