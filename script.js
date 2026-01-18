@@ -1,8 +1,14 @@
+/**
+ * AmpDialer Logic Controller
+ * Architecture: Flat Root (No /api folder)
+ */
+
 let leadQueue = [];
 let currentIndex = 0;
 
 /**
- * Initialization: Wait for SDK Handshake
+ * 1. SDK HANDSHAKE & INITIALIZATION
+ * Ensures ZOHO object is defined before running logic
  */
 function initWidget() {
     if (typeof ZOHO !== "undefined") {
@@ -11,6 +17,7 @@ function initWidget() {
             if (session) {
                 showMainUI();
                 fetchCustomViews();
+                // If specific view ID passed via Zoho, load it
                 if (data && data.cvid) loadViewData(data.cvid);
             } else {
                 showLogin();
@@ -18,13 +25,49 @@ function initWidget() {
         });
         ZOHO.embeddedApp.init();
     } else {
-        setTimeout(initWidget, 100); 
+        // Retry loop to handle SDK race condition
+        setTimeout(initWidget, 100);
     }
 }
+
+// Start the handshake
 initWidget();
 
 /**
- * Data Actions
+ * 2. AUTHENTICATION (ROOT-LEVEL)
+ * Points directly to /login.js in root
+ */
+async function performLogin() {
+    const user = document.getElementById("login-user").value;
+    const pass = document.getElementById("login-pass").value;
+    const status = document.getElementById("login-status");
+
+    status.innerText = "Authenticating...";
+
+    try {
+        const res = await fetch('/login.js', { 
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username: user, password: pass })
+        });
+        
+        const data = await res.json();
+        
+        if (data.access_token) {
+            localStorage.setItem("amp_session", JSON.stringify(data));
+            showMainUI();
+            fetchCustomViews();
+        } else {
+            status.innerText = "Login Failed: " + (data.error || "Check credentials");
+        }
+    } catch (e) {
+        status.innerText = "Network Error - check Vercel Logs";
+    }
+}
+
+/**
+ * 3. ZOHO DATA INTEGRATION
+ * Pulls Views and Records using Zoho SDK
  */
 function fetchCustomViews() {
     ZOHO.CRM.API.getCustomViews({ Entity: "Leads" })
@@ -53,61 +96,61 @@ function loadViewData(cvid) {
 }
 
 /**
- * API Calls: Authenticate and Dial
+ * 4. TELEPHONY EXECUTION
+ * Points to /dial.js using verified 'crmapi' connection
  */
-async function performLogin() {
-    const user = document.getElementById("login-user").value;
-    const pass = document.getElementById("login-pass").value;
-    const status = document.getElementById("login-status");
-    status.innerText = "Authenticating...";
-
-    try {
-        const res = await fetch('/login', { // Corrected root path
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ username: user, password: pass })
-        });
-        const data = await res.json();
-        if (data.access_token) {
-            localStorage.setItem("amp_session", JSON.stringify(data));
-            showMainUI();
-            fetchCustomViews();
-        } else {
-            status.innerText = "Login Failed: Check credentials";
-        }
-    } catch (e) { status.innerText = "API Connection Error"; }
-}
-
 async function initiateCall() {
+    if (!leadQueue[currentIndex]) return;
+    
     const lead = leadQueue[currentIndex];
     const session = JSON.parse(localStorage.getItem("amp_session"));
     
-    // CORRECTION: Pointing to root dial endpoint via Zoho Connector
+    // Invoke Vercel root function through Zoho's secure bridge
     ZOHO.CRM.CONNECTOR.invoke("crmapi", {
-        "url": "https://amp-dialer.vercel.app/dial", 
+        "url": "https://amp-dialer.vercel.app/dial.js", 
         "method": "POST",
         "body": JSON.stringify({ 
             toNumber: lead.Phone || lead.Mobile, 
             session: session 
         })
-    }).then(() => {
+    }).then(response => {
+        console.log("Dialer Response:", response);
         currentIndex++;
         updateLeadUI();
     });
 }
 
 /**
- * UI Utilities
+ * 5. UI CONTROLS
  */
 function updateLeadUI() {
     const nameEl = document.getElementById("entity-name");
-    const phoneEl = document.getElementById("phone-display"); // Matched to HTML
+    const phoneEl = document.getElementById("entity-phone");
+    const countEl = document.getElementById("queue-count");
+
     if (leadQueue.length > 0 && currentIndex < leadQueue.length) {
         const lead = leadQueue[currentIndex];
         nameEl.innerText = lead.Full_Name || "Unnamed Lead";
         phoneEl.innerText = lead.Phone || lead.Mobile || "No Number";
+        countEl.innerText = `Remaining: ${leadQueue.length - currentIndex}`;
+    } else {
+        nameEl.innerText = "Queue Empty";
+        phoneEl.innerText = "--";
+        countEl.innerText = "Leads: 0";
     }
 }
-function skipLead() { currentIndex++; updateLeadUI(); }
-function showMainUI() { document.getElementById("login-screen").style.display = "none"; document.getElementById("main-ui").style.display = "block"; }
-function showLogin() { document.getElementById("login-screen").style.display = "block"; document.getElementById("main-ui").style.display = "none"; }
+
+function skipLead() { 
+    currentIndex++; 
+    updateLeadUI(); 
+}
+
+function showMainUI() { 
+    document.getElementById("login-screen").style.display = "none"; 
+    document.getElementById("main-ui").style.display = "block"; 
+}
+
+function showLogin() { 
+    document.getElementById("login-screen").style.display = "block"; 
+    document.getElementById("main-ui").style.display = "none"; 
+}
