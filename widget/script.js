@@ -1,56 +1,55 @@
-/* script.js - Final Deployment */
-
 let leadQueue = [];
 let currentIndex = 0;
 
-function logDebug(label, data) {
-    const panel = document.getElementById('debug-panel');
-    if (!panel) return;
-    const entry = document.createElement('div');
-    let content = typeof data === 'object' ? JSON.stringify(data) : data;
-    entry.innerHTML = `[${new Date().toLocaleTimeString()}] <b>${label}</b>: ${content}`;
-    panel.prepend(entry);
-}
-
-// standard Zoho Initialization
+// Standard Zoho Handshake
 ZOHO.embeddedApp.on("PageLoad", function(data) {
-    logDebug("PAGELOAD", data);
-    const session = localStorage.getItem("amp_session");
-    if (session) {
+    const sessionStr = localStorage.getItem("amp_session");
+    if (sessionStr) {
         showMainUI();
-        if (data && data.cvid) loadViewData(data.cvid);
         fetchCustomViews();
+        // If loaded from a button context, use that view
+        if (data && data.cvid) loadViewData(data.cvid);
     } else {
         showLogin();
     }
 });
 
+// Start the SDK
 ZOHO.embeddedApp.init();
 
-/* --- API Functions --- */
+/* --- UI Controls --- */
+
+function showMainUI() {
+    document.getElementById("login-screen").style.display = "none";
+    document.getElementById("main-ui").style.display = "block";
+}
+
+function showLogin() {
+    document.getElementById("login-screen").style.display = "block";
+    document.getElementById("main-ui").style.display = "none";
+}
+
+/* --- Data Actions --- */
 
 function fetchCustomViews() {
-    logDebug("API", "Fetching views...");
     ZOHO.CRM.API.getCustomViews({ Entity: "Leads" })
         .then(res => {
-            logDebug("VIEWS_DATA", res);
-            const sel = document.getElementById("view-selector");
-            sel.innerHTML = '<option value="">-- Select View --</option>';
+            const selector = document.getElementById("view-selector");
+            selector.innerHTML = '<option value="">-- Switch View --</option>';
             if (res.custom_views) {
-                res.custom_views.forEach(v => {
-                    let o = document.createElement("option");
-                    o.value = v.id; o.innerText = v.display_value;
-                    sel.appendChild(o);
+                res.custom_views.forEach(view => {
+                    let opt = document.createElement("option");
+                    opt.value = view.id;
+                    opt.innerHTML = view.display_value;
+                    selector.appendChild(opt);
                 });
             }
         });
 }
 
 function loadViewData(cvid) {
-    if (!cvid) return;
     ZOHO.CRM.API.getAllRecords({ Entity: "Leads", cvid: cvid })
         .then(res => {
-            logDebug("RECORDS", `Loaded ${res.data ? res.data.length : 0}`);
             leadQueue = res.data || [];
             currentIndex = 0;
             updateLeadUI();
@@ -60,42 +59,55 @@ function loadViewData(cvid) {
 function updateLeadUI() {
     if (leadQueue.length > 0 && currentIndex < leadQueue.length) {
         const lead = leadQueue[currentIndex];
-        document.getElementById("entity-name").innerText = lead.Full_Name || "Unnamed";
-        document.getElementById("entity-phone").innerText = lead.Phone || lead.Mobile || "--";
+        document.getElementById("entity-name").innerText = lead.Full_Name || "Unnamed Lead";
+        document.getElementById("entity-phone").innerText = lead.Phone || lead.Mobile || "No Number";
+        document.getElementById("queue-count").innerText = `Leads: ${leadQueue.length - currentIndex}`;
     }
 }
 
 async function performLogin() {
-    const u = document.getElementById("login-user").value;
-    const p = document.getElementById("login-pass").value;
+    const user = document.getElementById("login-user").value;
+    const pass = document.getElementById("login-pass").value;
+    const status = document.getElementById("login-status");
+
+    status.innerText = "Authenticating...";
+
     try {
         const res = await fetch('/api/login', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ username: u, password: p })
+            body: JSON.stringify({ username: user, password: pass })
         });
         const data = await res.json();
+
         if (data.access_token) {
             localStorage.setItem("amp_session", JSON.stringify(data));
             showMainUI();
             fetchCustomViews();
+        } else {
+            status.innerText = "Login Failed: " + (data.error || "Check credentials");
         }
-    } catch (e) { logDebug("LOGIN_ERR", e.message); }
+    } catch (e) {
+        status.innerText = "Network Error - check Vercel Logs";
+    }
 }
 
 async function initiateCall() {
     const lead = leadQueue[currentIndex];
     const session = JSON.parse(localStorage.getItem("amp_session"));
+    
+    // Uses the validated connection name 'crmapi'
     ZOHO.CRM.CONNECTOR.invoke("crmapi", {
         "url": "https://amp-dialer.vercel.app/api/dial",
         "method": "POST",
         "body": JSON.stringify({ toNumber: lead.Phone, session: session })
-    }).then(() => {
+    }).then(res => {
         currentIndex++;
         updateLeadUI();
     });
 }
 
-function skipLead() { currentIndex++; updateLeadUI(); }
-function showMainUI() { document.getElementById("login-screen").style.display = "none"; document.getElementById("main-ui").style.display = "block"; }
-function showLogin() { document.getElementById("login-screen").style.display = "block"; document.getElementById("main-ui").style.display = "none"; }
+function skipLead() {
+    currentIndex++;
+    updateLeadUI();
+}
