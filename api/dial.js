@@ -2,44 +2,33 @@ export default async function handler(req, res) {
   res.setHeader('Content-Type', 'application/json');
   res.setHeader('Access-Control-Allow-Origin', '*');
 
-  const { toNumber, session } = req.body;
-  const host = (process.env.NS_HOST || 'api.ringlogix.com').trim();
-
-  console.log(`[DEBUG] Starting Dial: Target=${toNumber}, User=${session?.user}`);
+  if (req.method === 'OPTIONS') return res.status(200).end();
 
   try {
-    const dialUrl = `https://${host}/pbx/v1/?object=call&action=call&format=json`;
+    const { toNumber, session } = req.body;
     
+    // v1 Action Path verified in Postman
+    const dialUrl = `https://api.ringlogix.com/pbx/v1/?object=call&action=call&format=json`;
+
     const bodyParams = new URLSearchParams({
       callid: `amp-${Date.now()}`,
-      uid: `${session.user}@${session.domain}`,
-      destination: `sip:${toNumber}@${session.domain}`
+      uid: session.uid, // 101@291565
+      destination: `sip:${toNumber}@${session.domain}` // sip:1770...
     });
-
-    console.log(`[DEBUG] Dial URL: ${dialUrl}`);
-    console.log(`[DEBUG] Dial Body: ${bodyParams.toString()}`);
 
     const response = await fetch(dialUrl, {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${session.access_token}`,
-        'Content-Type': 'application/x-www-form-urlencoded',
-        'Accept': 'application/json'
+        'Content-Type': 'application/x-www-form-urlencoded'
       },
       body: bodyParams.toString()
     });
 
-    const responseText = await response.text();
-    console.log(`[DEBUG] Dial Response Status: ${response.status}`);
-    console.log(`[DEBUG] Dial Response Body: ${responseText}`);
-
-    return res.status(response.status).json({
-      success: response.ok,
-      gateway_response: responseText
-    });
+    const data = await response.json();
+    return res.status(response.status).json(data);
 
   } catch (err) {
-    console.error("[CRITICAL] Dial Script Crash:", err.message);
     return res.status(500).json({ success: false, error: err.message });
   }
 }
