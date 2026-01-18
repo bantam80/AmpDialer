@@ -2,10 +2,20 @@ let leadQueue = [];
 let currentIndex = 0;
 
 ZOHO.embeddedApp.on("PageLoad", function(data) {
-    // 1. Fetch available Custom Views for the Leads Module
+    // When the button is pressed, Zoho passes the Custom View ID (cvid)
+    if (data && data.cvid) {
+        loadViewData(data.cvid);
+    }
+    fetchCustomViews();
+});
+
+ZOHO.embeddedApp.init();
+
+function fetchCustomViews() {
     ZOHO.CRM.API.getCustomViews({ Entity: "Leads" })
         .then(res => {
             const selector = document.getElementById("view-selector");
+            selector.innerHTML = '<option value="">-- Switch View --</option>';
             res.custom_views.forEach(view => {
                 let opt = document.createElement("option");
                 opt.value = view.id;
@@ -13,53 +23,35 @@ ZOHO.embeddedApp.on("PageLoad", function(data) {
                 selector.appendChild(opt);
             });
         });
-});
+}
 
-ZOHO.embeddedApp.init();
-
-async function loadViewData() {
-    const cvid = document.getElementById("view-selector").value;
-    if (!cvid) return;
-
-    // 2. Load records associated with the selected Custom View
-    ZOHO.CRM.API.getAllRecords({ Entity: "Leads", cvid: cvid, sort_order: "asc" })
+async function loadViewData(cvid) {
+    // Fetch up to 200 records from the selected Custom View
+    ZOHO.CRM.API.getAllRecords({ Entity: "Leads", cvid: cvid })
         .then(res => {
-            leadQueue = res.data;
+            leadQueue = res.data || [];
             currentIndex = 0;
-            updateQueueUI();
+            updateUI(); // Refresh the card with the first lead
         });
 }
 
-function updateQueueUI() {
-    if (leadQueue.length > 0 && currentIndex < leadQueue.length) {
-        const lead = leadQueue[currentIndex];
-        document.getElementById("active-lead-card").style.display = "block";
-        document.getElementById("entity-name").innerText = lead.Full_Name || "Unnamed Lead";
-        document.getElementById("entity-phone").innerText = lead.Phone || lead.Mobile || "No Number";
-        document.getElementById("queue-stats").innerText = `Leads in Queue: ${leadQueue.length - currentIndex}`;
-    } else {
-        document.getElementById("active-lead-card").style.display = "none";
-        document.getElementById("queue-stats").innerText = "Queue Completed";
-    }
-}
-
 async function initiateCall() {
+    const lead = leadQueue[currentIndex];
+    const phone = lead.Phone || lead.Mobile;
     const session = JSON.parse(localStorage.getItem("amp_session"));
-    const phone = document.getElementById("entity-phone").innerText;
 
-    if (phone === "No Number") return skipLead();
+    if (!phone) return alert("No phone number found.");
 
-    const res = await fetch('/api/dial', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ toNumber: phone, session })
+    // Using your 'crmapi' connection to bridge to your Vercel dialer
+    ZOHO.CRM.CONNECTOR.invoke("crmapi", {
+        "url": "https://amp-dialer.vercel.app/api/dial",
+        "method": "POST",
+        "body": JSON.stringify({
+            "toNumber": phone,
+            "session": session
+        })
+    }).then(res => {
+        console.log("Dialer Response:", res);
+        // Logic to move to next lead or show 'active' state
     });
-    
-    const data = await res.json();
-    if (res.ok) {
-        console.log("Dialing:", phone);
-        // Advance to next lead after successful trigger
-        currentIndex++;
-        updateQueueUI();
-    }
 }
