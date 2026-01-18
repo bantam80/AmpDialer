@@ -1,37 +1,24 @@
 let leadQueue = [];
 let currentIndex = 0;
 
-// Standard Zoho Handshake
+// Initialize Zoho SDK
 ZOHO.embeddedApp.on("PageLoad", function(data) {
-    const sessionStr = localStorage.getItem("amp_session");
-    if (sessionStr) {
+    const session = localStorage.getItem("amp_session");
+    if (session) {
         showMainUI();
         fetchCustomViews();
-        // If loaded from a button context, use that view
         if (data && data.cvid) loadViewData(data.cvid);
     } else {
         showLogin();
     }
 });
 
-// Start the SDK
 ZOHO.embeddedApp.init();
 
-/* --- UI Controls --- */
-
-function showMainUI() {
-    document.getElementById("login-screen").style.display = "none";
-    document.getElementById("main-ui").style.display = "block";
-}
-
-function showLogin() {
-    document.getElementById("login-screen").style.display = "block";
-    document.getElementById("main-ui").style.display = "none";
-}
-
-/* --- Data Actions --- */
+/* --- API CALLS --- */
 
 function fetchCustomViews() {
+    // Verified working in your Deluge diagnostic
     ZOHO.CRM.API.getCustomViews({ Entity: "Leads" })
         .then(res => {
             const selector = document.getElementById("view-selector");
@@ -48,6 +35,7 @@ function fetchCustomViews() {
 }
 
 function loadViewData(cvid) {
+    if (!cvid) return;
     ZOHO.CRM.API.getAllRecords({ Entity: "Leads", cvid: cvid })
         .then(res => {
             leadQueue = res.data || [];
@@ -56,12 +44,14 @@ function loadViewData(cvid) {
         });
 }
 
+/* --- UI & ACTIONS --- */
+
 function updateLeadUI() {
     if (leadQueue.length > 0 && currentIndex < leadQueue.length) {
         const lead = leadQueue[currentIndex];
         document.getElementById("entity-name").innerText = lead.Full_Name || "Unnamed Lead";
         document.getElementById("entity-phone").innerText = lead.Phone || lead.Mobile || "No Number";
-        document.getElementById("queue-count").innerText = `Leads: ${leadQueue.length - currentIndex}`;
+        document.getElementById("queue-count").innerText = `Queue: ${leadQueue.length - currentIndex}`;
     }
 }
 
@@ -85,10 +75,10 @@ async function performLogin() {
             showMainUI();
             fetchCustomViews();
         } else {
-            status.innerText = "Login Failed: " + (data.error || "Check credentials");
+            status.innerText = "Error: " + (data.error || "Login Failed");
         }
     } catch (e) {
-        status.innerText = "Network Error - check Vercel Logs";
+        status.innerText = "Network Error";
     }
 }
 
@@ -96,18 +86,23 @@ async function initiateCall() {
     const lead = leadQueue[currentIndex];
     const session = JSON.parse(localStorage.getItem("amp_session"));
     
-    // Uses the validated connection name 'crmapi'
+    // Using 'crmapi' connection validated in Deluge
     ZOHO.CRM.CONNECTOR.invoke("crmapi", {
         "url": "https://amp-dialer.vercel.app/api/dial",
         "method": "POST",
-        "body": JSON.stringify({ toNumber: lead.Phone, session: session })
+        "body": JSON.stringify({ toNumber: lead.Phone || lead.Mobile, session: session })
     }).then(res => {
         currentIndex++;
         updateLeadUI();
     });
 }
 
-function skipLead() {
-    currentIndex++;
-    updateLeadUI();
+function skipLead() { currentIndex++; updateLeadUI(); }
+function showMainUI() { 
+    document.getElementById("login-screen").style.display = "none"; 
+    document.getElementById("main-ui").style.display = "block"; 
+}
+function showLogin() { 
+    document.getElementById("login-screen").style.display = "block"; 
+    document.getElementById("main-ui").style.display = "none"; 
 }
