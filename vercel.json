@@ -18,8 +18,12 @@
       "destination": "/widget/index.html"
     },
     {
-      "source": "/(.*)",
+      "source": "/widget",
       "destination": "/widget/index.html"
+    },
+    {
+      "source": "/widget/(.*)",
+      "destination": "/widget/$1"
     }
   ],
   "headers": [
@@ -28,7 +32,7 @@
       "headers": [
         {
           "key": "Content-Security-Policy",
-          "value": "frame-ancestors 'self' https://crm.zoho.com https://crmplus.zoho.com;"
+          "value": "frame-ancestors 'self' https://crm.zoho.com https://crmplus.zoho.com https://*.zohocrm.com;"
         }
       ]
     }
