@@ -11,27 +11,31 @@ export default async function handler(req, res) {
   const { NS_HOST } = process.env;
 
   try {
-    // Standard endpoint to get devices for a specific user
-    const statusUrl = `https://${NS_HOST}/ns-api/v2/domains/${domain}/users/${extension}/devices/`;
+    // Switching to the pbx/v1 gateway which we know works for your host
+    const statusUrl = `https://${NS_HOST}/pbx/v1/domains/${domain}/users/${extension}/devices/`;
     
+    console.log(`Checking device status at: ${statusUrl}`);
+
     const response = await axios.get(statusUrl, {
       headers: { 'Authorization': `Bearer ${token}` }
     });
 
-    // We filter for your specific 'wp' device to see if it's 'Registered'
     const devices = response.data;
-    const wpDevice = devices.find(d => d.device === `${extension}wp`);
+    // NetSapiens typically returns an array or object of devices
+    const deviceList = Array.isArray(devices) ? devices : (devices.data || []);
+    const wpDevice = deviceList.find(d => d.device?.toLowerCase().includes('wp'));
 
     return res.status(200).json({ 
       success: true, 
-      devices: devices,
+      devices: deviceList,
       wpStatus: wpDevice ? wpDevice.registration_status : "Not Found"
     });
 
   } catch (err) {
+    console.error("Status Error:", err.response?.data || err.message);
     return res.status(err.response?.status || 500).json({ 
       success: false, 
-      error: err.message 
+      error: `Status Check Failed: ${err.message}` 
     });
   }
 }
