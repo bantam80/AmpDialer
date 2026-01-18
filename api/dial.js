@@ -8,14 +8,13 @@ export default async function handler(req, res) {
   const clusterHost = process.env.NS_CLUSTER_HOST;
 
   try {
-    // Standard v2 Call Control path on your specific cluster
     const dialUrl = `https://${clusterHost}/ns-api/v2/domains/${session.domain}/users/${session.extension}/calls/`;
     
     const response = await axios.post(
       dialUrl,
       { 
         destination: toNumber,
-        device: `${session.extension}wp` 
+        device: `${session.extension}wp` // Targets 101wp
       },
       {
         headers: { 
@@ -26,7 +25,12 @@ export default async function handler(req, res) {
     );
 
     return res.status(200).json({ success: true, data: response.data });
+
   } catch (err) {
-    return res.status(err.response?.status || 500).json({ success: false, error: err.message });
+    console.error("Dial Error Detail:", err.response?.data || err.message);
+    return res.status(err.response?.status || 400).json({ 
+      success: false, 
+      error: err.response?.data?.message || err.message 
+    });
   }
 }
