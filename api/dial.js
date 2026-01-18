@@ -11,8 +11,8 @@ export default async function handler(req, res) {
   const { NS_HOST } = process.env;
 
   try {
-    // Attempting the standard v2 path which is typically used for call control
-    const dialUrl = `https://${NS_HOST}/apiv2/domains/${session.domain}/users/${session.extension}/calls`;
+    // Aligned with the working /pbx/v1/ path from your login success
+    const dialUrl = `https://${NS_HOST}/pbx/v1/domains/${session.domain}/users/${session.extension}/calls`;
     
     console.log(`Attempting Dial to: ${toNumber} via ${dialUrl} for device 101WP`);
 
@@ -20,7 +20,7 @@ export default async function handler(req, res) {
       dialUrl,
       { 
         destination: toNumber,
-        device: "101WP" // Explicitly targeting your device ID
+        device: "101WP" // Explicitly targeting your specific device ID
       },
       {
         headers: { 
@@ -36,7 +36,6 @@ export default async function handler(req, res) {
     });
 
   } catch (err) {
-    // Log the error detail to see if it's still a 404 or something else (like device offline)
     console.error("Dial Error Detail:", err.response?.data || err.message);
     
     return res.status(err.response?.status || 500).json({ 
