@@ -1,36 +1,30 @@
-/* script.js - Final Stable Version */
+/* script.js - Stable Initialization */
 
 let leadQueue = [];
 let currentIndex = 0;
 
-// Wrap in a function to prevent immediate execution if SDK is slow
-function initWidget() {
-    if (typeof ZOHO === "undefined") {
-        console.warn("Zoho SDK not ready, retrying...");
-        setTimeout(initWidget, 100);
-        return;
+// Listen for PageLoad - Zoho calls this when the widget is framed properly
+ZOHO.embeddedApp.on("PageLoad", function(data) {
+    console.log("Zoho SDK Verified. Context:", data);
+    
+    const sessionStr = localStorage.getItem("amp_session");
+    if (sessionStr) {
+        showMainUI();
+        if (data && data.cvid) loadViewData(data.cvid);
+        fetchCustomViews();
+    } else {
+        showLogin();
     }
+});
 
-    ZOHO.embeddedApp.on("PageLoad", function(data) {
-        console.log("AmpDialer Context:", data);
-        
-        const sessionStr = localStorage.getItem("amp_session");
-        if (sessionStr) {
-            showMainUI();
-            if (data && data.cvid) loadViewData(data.cvid);
-            fetchCustomViews();
-        } else {
-            showLogin();
-        }
-    });
-
+// Explicitly call init - if this fails, check browser console for 'ZOHO undefined'
+try {
     ZOHO.embeddedApp.init();
+} catch (e) {
+    console.error("Critical: ZOHO SDK failed to initialize. Link may be blocked.", e);
 }
 
-// Start the check
-initWidget();
-
-/* --- Core Functions --- */
+/* --- UI Logic --- */
 
 function showMainUI() {
     document.getElementById("login-screen").style.display = "none";
@@ -47,7 +41,7 @@ async function performLogin() {
     const password = document.getElementById("login-pass").value;
     const statusDiv = document.getElementById("login-status");
 
-    statusDiv.innerText = "Connecting...";
+    statusDiv.innerText = "Authenticating...";
 
     try {
         const res = await fetch('/api/login', {
@@ -62,22 +56,28 @@ async function performLogin() {
             showMainUI();
             fetchCustomViews();
         } else {
-            statusDiv.innerText = "Error: " + (data.error || "Login Failed");
+            statusDiv.innerText = "Login Failed: " + (data.error || "Invalid Credentials");
         }
-    } catch (e) { statusDiv.innerText = "Network Error"; }
+    } catch (e) {
+        statusDiv.innerText = "Network Error - check Vercel Logs";
+    }
 }
+
+/* --- Zoho Data Functions --- */
 
 function fetchCustomViews() {
     ZOHO.CRM.API.getCustomViews({ Entity: "Leads" })
         .then(res => {
             const selector = document.getElementById("view-selector");
             selector.innerHTML = '<option value="">-- Switch View --</option>';
-            res.custom_views.forEach(view => {
-                let opt = document.createElement("option");
-                opt.value = view.id;
-                opt.innerHTML = view.display_value;
-                selector.appendChild(opt);
-            });
+            if (res.custom_views) {
+                res.custom_views.forEach(view => {
+                    let opt = document.createElement("option");
+                    opt.value = view.id;
+                    opt.innerHTML = view.display_value;
+                    selector.appendChild(opt);
+                });
+            }
         });
 }
 
@@ -95,7 +95,7 @@ function updateLeadUI() {
         const lead = leadQueue[currentIndex];
         document.getElementById("entity-name").innerText = lead.Full_Name || (lead.First_Name + ' ' + lead.Last_Name).trim() || "Unnamed Lead";
         document.getElementById("entity-phone").innerText = lead.Phone || lead.Mobile || "No Number";
-        document.getElementById("queue-count").innerText = `Leads: ${leadQueue.length - currentIndex}`;
+        document.getElementById("queue-count").innerText = `Queue: ${leadQueue.length - currentIndex}`;
     }
 }
 
@@ -107,15 +107,13 @@ function skipLead() {
 async function initiateCall() {
     const lead = leadQueue[currentIndex];
     const session = JSON.parse(localStorage.getItem("amp_session"));
-
-    if (!lead || !lead.Phone) return alert("No valid lead/phone selected.");
+    if (!lead || !lead.Phone) return alert("No number to dial.");
 
     ZOHO.CRM.CONNECTOR.invoke("crmapi", {
         "url": "https://amp-dialer.vercel.app/api/dial",
         "method": "POST",
         "body": JSON.stringify({ toNumber: lead.Phone, session: session })
     }).then(res => {
-        console.log("Dial Triggered:", res);
         currentIndex++;
         updateLeadUI();
     });
