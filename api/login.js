@@ -4,21 +4,23 @@ export default async function handler(req, res) {
 
   if (req.method === 'OPTIONS') return res.status(200).end();
 
+  const { username, password } = req.body;
+  const host = (process.env.NS_HOST || 'api.ringlogix.com').trim();
+  const secret = (process.env.NS_CLIENT_SECRET || '').trim();
+  const client_id = '0-t41691-c291565-r291528'; 
+
+  console.log(`[DEBUG] Attempting Login to: https://${host}/pbx/v1/oauth2/token/`);
+  console.log(`[DEBUG] Payload IDs: ClientID=${client_id}, SecretPresent=${!!secret}`);
+
   try {
-    const { username, password } = req.body;
-    const { NS_HOST, NS_CLIENT_SECRET } = process.env;
-
-    const authUrl = `https://${NS_HOST}/pbx/v1/oauth2/token/`;
-
-    // Switch to URLSearchParams to ensure 'application/x-www-form-urlencoded' format
     const bodyParams = new URLSearchParams();
     bodyParams.append('grant_type', 'password');
-    bodyParams.append('client_id', '0-t41691-c291565-r291528');
-    bodyParams.append('client_secret', NS_CLIENT_SECRET);
-    bodyParams.append('username', username);
-    bodyParams.append('password', password);
+    bodyParams.append('client_id', client_id);
+    bodyParams.append('client_secret', secret);
+    bodyParams.append('username', username?.trim());
+    bodyParams.append('password', password?.trim());
 
-    const response = await fetch(authUrl, {
+    const response = await fetch(`https://${host}/pbx/v1/oauth2/token/`, {
       method: 'POST',
       headers: { 
         'Content-Type': 'application/x-www-form-urlencoded',
@@ -28,13 +30,16 @@ export default async function handler(req, res) {
     });
 
     const responseText = await response.text();
-    
-    // If the gateway still returns a 400, this will show us exactly why (e.g., "invalid_grant")
+    console.log(`[DEBUG] Gateway Status: ${response.status}`);
+    console.log(`[DEBUG] Gateway Raw Response: ${responseText}`);
+
     if (!response.ok) {
       return res.status(response.status).json({ 
         success: false, 
-        error: responseText || "Gateway rejected the request format",
-        status: response.status 
+        error: "Login Step Failed",
+        gateway_status: response.status,
+        gateway_response: responseText,
+        debug_info: { host, client_id, secret_length: secret.length }
       });
     }
 
@@ -42,6 +47,7 @@ export default async function handler(req, res) {
     return res.status(200).json(data);
 
   } catch (err) {
+    console.error("[CRITICAL] Login Script Crash:", err.message);
     return res.status(500).json({ success: false, error: err.message });
   }
 }
