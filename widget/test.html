@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>AmpDialer - Headless Test</title>
+    <style>
+        body { font-family: sans-serif; padding: 40px; line-height: 1.6; max-width: 500px; margin: auto; }
+        .config-box { border: 1px solid #ccc; padding: 20px; border-radius: 8px; background: #f9f9f9; }
+        input { width: 100%; padding: 10px; margin: 10px 0; box-sizing: border-box; }
+        button { width: 100%; padding: 12px; background: #007bff; color: white; border: none; cursor: pointer; font-weight: bold; }
+        #status { margin-top: 20px; padding: 10px; border-radius: 4px; display: none; }
+    </style>
+</head>
+<body>
+    <h2>Dialer Connectivity Test</h2>
+    <div class="config-box">
+        <label>1. Login to NetSapiens</label>
+        <input type="text" id="user" placeholder="101@domain.com">
+        <input type="password" id="pass" placeholder="PBX Password">
+        <button onclick="testLogin()">Step 1: Authenticate</button>
+        <hr>
+        <label>2. Test Dial</label>
+        <input type="text" id="target" placeholder="Recipient Phone (e.g. 15551234567)">
+        <button id="dialBtn" onclick="testDial()" disabled>Step 2: Execute Dial</button>
+    </div>
+    <div id="status"></div>
+
+    <script>
+        let sessionData = null;
+        const statusDiv = document.getElementById('status');
+
+        function log(msg, isError = false) {
+            statusDiv.style.display = "block";
+            statusDiv.style.background = isError ? "#ffdce0" : "#d1e7dd";
+            statusDiv.innerText = msg;
+        }
+
+        async function testLogin() {
+            log("Authenticating...");
+            const res = await fetch('/api/login', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    user: document.getElementById('user').value,
+                    pass: document.getElementById('pass').value
+                })
+            });
+            const data = await res.json();
+            if (data.success) {
+                sessionData = data.session;
+                document.getElementById('dialBtn').disabled = false;
+                log("Authenticated! Token received.");
+            } else {
+                log("Login Failed: " + data.error, true);
+            }
+        }
+
+        async function testDial() {
+            log("Sending dial command...");
+            const res = await fetch('/api/dial', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    toNumber: document.getElementById('target').value,
+                    session: sessionData
+                })
+            });
+            const data = await res.json();
+            if (data.success) {
+                log("Success! Your SNAP.Go should be ringing now.");
+            } else {
+                log("Dial Error: " + data.error, true);
+            }
+        }
+    </script>
+</body>
+</html>
