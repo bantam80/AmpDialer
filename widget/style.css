@@ -1,9 +1,96 @@
-body { font-family: sans-serif; padding: 15px; margin: 0; background: #f4f7f9; }
-.screen { display: flex; flex-direction: column; gap: 10px; }
-.card { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
-input, textarea { width: 100%; padding: 8px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; }
-button { padding: 10px; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; width: 100%; }
-.primary { background: #007bff; color: white; }
+/* style.css - Clean Widget UI */
+:root {
+    --primary: #0070f3;
+    --success: #28a745;
+    --error: #dc3545;
+    --bg: #f8f9fa;
+    --text: #333;
+    --border: #e1e4e8;
+}
+
+body {
+    font-family: -apple-system, system-ui, sans-serif;
+    margin: 0;
+    padding: 10px;
+    background: var(--bg);
+    color: var(--text);
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    box-sizing: border-box;
+}
+
+.screen {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.card {
+    background: white;
+    padding: 15px;
+    border-radius: 8px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+    border: 1px solid var(--border);
+}
+
+.header-card {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 5px;
+}
+
+h2, h3 { margin: 0; font-size: 16px; }
+p { margin: 5px 0 0; color: #666; font-size: 13px; }
+
+input, select, textarea {
+    width: 100%;
+    padding: 10px;
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    font-size: 14px;
+    box-sizing: border-box;
+}
+
+textarea {
+    flex-grow: 1;
+    min-height: 80px;
+    resize: none;
+    margin-top: 10px;
+}
+
+button {
+    padding: 12px;
+    border: none;
+    border-radius: 5px;
+    cursor: pointer;
+    font-weight: 600;
+    font-size: 14px;
+    transition: filter 0.2s;
+}
+
+button:active { filter: brightness(0.9); }
+button:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.primary { background: var(--primary); color: white; }
 .secondary { background: #6c757d; color: white; }
-.success { background: #28a745; color: white; }
-button:disabled { opacity: 0.5; }
+.success { background: var(--success); color: white; }
+
+.actions {
+    display: flex;
+    gap: 10px;
+    margin-top: 10px;
+}
+
+#queue-count {
+    font-size: 12px;
+    font-weight: bold;
+    color: var(--primary);
+}
+
+#login-status {
+    font-size: 12px;
+    margin-top: 8px;
+    text-align: center;
+}
