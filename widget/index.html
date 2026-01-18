@@ -1,33 +1,29 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>AmpDialer</title>
+    <title>AmpDialer View Manager</title>
     <script src="https://live.zohocrm.com/crm/v2/utils/ZSDK.js"></script>
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
-    <div id="login-screen" class="screen">
+    <div id="main-ui" class="screen">
         <div class="card">
-            <h2>AmpDialer Login</h2>
-            <input type="text" id="login-user" placeholder="user@domain">
-            <input type="password" id="login-pass" placeholder="Password">
-            <button onclick="performLogin()" class="primary">Login</button>
+            <label>Select Custom View</label>
+            <select id="view-selector" onchange="loadViewData()">
+                <option value="">-- Choose a View --</option>
+            </select>
+            <div id="queue-stats">Leads in Queue: 0</div>
         </div>
-    </div>
 
-    <div id="main-ui" class="screen" style="display:none;">
-        <div class="header">
-            <h3 id="entity-name">Loading...</h3>
+        <div class="card" id="active-lead-card" style="display:none;">
+            <h3 id="entity-name">No Lead Active</h3>
             <p id="entity-phone">--</p>
+            <div class="actions">
+                <button onclick="initiateCall()" class="primary">Dial Next</button>
+                <button onclick="skipLead()" class="secondary">Skip</button>
+            </div>
         </div>
-        <div class="actions">
-            <button id="dial-btn" class="primary" onclick="initiateCall()">Dial</button>
-            <button id="vmdrop-btn" class="secondary" onclick="triggerVMDrop()" disabled>VM Drop</button>
-        </div>
-        <textarea id="call-notes" placeholder="Call notes..."></textarea>
-        <button class="success" onclick="saveToZoho()">Save & End</button>
     </div>
-
     <script src="script.js"></script>
 </body>
 </html>
