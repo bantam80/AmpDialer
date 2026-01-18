@@ -1,29 +1,54 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-    <title>AmpDialer View Manager</title>
-    <script src="https://live.zohocrm.com/crm/v2/utils/ZSDK.js"></script>
-    <link rel="stylesheet" href="style.css">
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AmpDialer | Zoho CRM Widget</title>
+    
+    <script src="https://js.zohostatic.com/zohocrm/v2/sdk/7.0.6/sdk.min.js"></script>
+    
+    <link rel="stylesheet" href="/widget/style.css">
 </head>
 <body>
-    <div id="main-ui" class="screen">
+    <div id="login-screen" class="screen">
         <div class="card">
-            <label>Select Custom View</label>
-            <select id="view-selector" onchange="loadViewData()">
-                <option value="">-- Choose a View --</option>
-            </select>
-            <div id="queue-stats">Leads in Queue: 0</div>
-        </div>
-
-        <div class="card" id="active-lead-card" style="display:none;">
-            <h3 id="entity-name">No Lead Active</h3>
-            <p id="entity-phone">--</p>
-            <div class="actions">
-                <button onclick="initiateCall()" class="primary">Dial Next</button>
-                <button onclick="skipLead()" class="secondary">Skip</button>
-            </div>
+            <h2>AmpDialer Login</h2>
+            <p class="subtitle">Enter your PBX credentials to begin dialing.</p>
+            <input type="text" id="login-user" placeholder="user@domain (e.g. 101@291565)">
+            <input type="password" id="login-pass" placeholder="Password">
+            <button onclick="performLogin()" class="primary">Authenticate</button>
+            <div id="login-status"></div>
         </div>
     </div>
-    <script src="script.js"></script>
+
+    <div id="main-ui" class="screen" style="display:none;">
+        <div class="header-card">
+            <div class="view-controls">
+                <label for="view-selector">Active View</label>
+                <select id="view-selector" onchange="loadViewData(this.value)">
+                    <option value="">-- Loading Views --</option>
+                </select>
+            </div>
+            <div id="queue-count">Leads in Queue: 0</div>
+        </div>
+
+        <div id="active-lead-card" class="card">
+            <div class="lead-info">
+                <h3 id="entity-name">Select a view to begin</h3>
+                <p id="entity-phone">--</p>
+            </div>
+            <div class="actions">
+                <button id="dial-btn" class="primary" onclick="initiateCall()">Dial Lead</button>
+                <button class="secondary" onclick="skipLead()">Skip</button>
+            </div>
+        </div>
+
+        <div class="notes-section">
+            <textarea id="call-notes" placeholder="Enter call notes here..."></textarea>
+            <button class="success" onclick="saveToZoho()">Save & End Call</button>
+        </div>
+    </div>
+
+    <script src="/widget/script.js"></script>
 </body>
 </html>
