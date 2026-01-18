@@ -1,15 +1,40 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AmpDialer Widget</title>
     <script src="https://live.zohocrm.com/crm/v2/utils/ZSDK.js"></script>
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
-    <div id="dialer-ui">
-        <h3 id="contact-name">Loading...</h3>
-        <button onclick="initiateCall()">Dial Number</button>
-        <textarea placeholder="Enter call notes..."></textarea>
-        <button id="vmdrop-btn" style="display:none;">VM Drop</button>
+    <div class="container">
+        <header>
+            <h2 id="entity-name">No Record Loaded</h2>
+            <p id="entity-phone">--</p>
+        </header>
+
+        <div class="controls">
+            <button id="dial-btn" class="btn-primary" onclick="initiateCall()">Dial</button>
+            <button id="vmdrop-btn" class="btn-secondary" onclick="triggerVMDrop()" disabled>VM Drop</button>
+            <button id="hangup-btn" class="btn-danger" onclick="hangup()" disabled>Hangup</button>
+        </div>
+
+        <div class="script-section">
+            <p><strong>Sales Script:</strong></p>
+            <p id="script-text">Hello, I'm calling from...</p>
+        </div>
+
+        <div class="notes-section">
+            <textarea id="call-notes" placeholder="Type call notes here..."></textarea>
+            <select id="disposition">
+                <option value="none">Select Disposition</option>
+                <option value="interested">Interested</option>
+                <option value="not_interested">Not Interested</option>
+                <option value="no_answer">No Answer</option>
+            </select>
+            <button class="btn-save" onclick="saveToZoho()">Save & Log Call</button>
+        </div>
     </div>
 
     <script src="script.js"></script>
