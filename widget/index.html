@@ -13,8 +13,7 @@
     <div id="login-screen" class="screen">
         <div class="card">
             <h2>AmpDialer Login</h2>
-            <p class="subtitle">Enter your PBX credentials to begin dialing.</p>
-            <input type="text" id="login-user" placeholder="user@domain (e.g. 101@291565)">
+            <input type="text" id="login-user" placeholder="user@domain">
             <input type="password" id="login-pass" placeholder="Password">
             <button onclick="performLogin()" class="primary">Authenticate</button>
             <div id="login-status"></div>
@@ -23,29 +22,19 @@
 
     <div id="main-ui" class="screen" style="display:none;">
         <div class="header-card">
-            <div class="view-controls">
-                <label for="view-selector">Active View</label>
-                <select id="view-selector" onchange="loadViewData(this.value)">
-                    <option value="">-- Loading Views --</option>
-                </select>
-            </div>
-            <div id="queue-count">Leads in Queue: 0</div>
+            <select id="view-selector" onchange="loadViewData(this.value)">
+                <option value="">-- Switch View --</option>
+            </select>
+            <div id="queue-count">Leads: 0</div>
         </div>
 
-        <div id="active-lead-card" class="card">
-            <div class="lead-info">
-                <h3 id="entity-name">Select a view to begin</h3>
-                <p id="entity-phone">--</p>
-            </div>
+        <div class="card">
+            <h3 id="entity-name">Ready</h3>
+            <p id="entity-phone">--</p>
             <div class="actions">
-                <button id="dial-btn" class="primary" onclick="initiateCall()">Dial Lead</button>
-                <button class="secondary" onclick="skipLead()">Skip</button>
+                <button onclick="initiateCall()" class="primary">Dial Lead</button>
+                <button onclick="skipLead()" class="secondary">Skip</button>
             </div>
-        </div>
-
-        <div class="notes-section">
-            <textarea id="call-notes" placeholder="Enter call notes here..."></textarea>
-            <button class="success" onclick="saveToZoho()">Save & End Call</button>
         </div>
     </div>
 
