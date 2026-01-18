@@ -1,8 +1,8 @@
-// Use require to avoid ESM/CommonJS casing issues on Vercel
+// Use lowercase 'axios' to avoid case-sensitivity issues on Vercel
 const axios = require('axios');
 
 export default async function handler(req, res) {
-  // 1. Force JSON headers immediately
+  // Force JSON headers to stop the "Unexpected token A" browser crash
   res.setHeader('Content-Type', 'application/json');
   res.setHeader('Access-Control-Allow-Origin', '*');
 
@@ -11,17 +11,17 @@ export default async function handler(req, res) {
   try {
     const { username, password } = req.body;
     
-    // 2. Validate Env Variables locally so we don't hit a blind crash
+    // Evaluate if environment variables are present
     if (!process.env.NS_HOST || !process.env.NS_CLIENT_SECRET) {
-      throw new Error("Missing NS_HOST or NS_CLIENT_SECRET in Vercel settings.");
+      return res.status(500).json({ error: "Missing environment variables on Vercel." });
     }
 
+    // Token acquisition MUST hit the central host (api.ringlogix.com)
     const authUrl = `https://${process.env.NS_HOST}/pbx/v1/oauth2/token/`;
 
-    // 3. Match your verified Postman body exactly
     const response = await axios.post(authUrl, {
       grant_type: 'password',
-      client_id: '0-t41691-c291565-r291528',
+      client_id: '0-t41691-c291565-r291528', // Validated client_id
       client_secret: process.env.NS_CLIENT_SECRET,
       username: username,
       password: password
@@ -29,16 +29,15 @@ export default async function handler(req, res) {
       headers: { 'Content-Type': 'application/json' }
     });
 
-    // 4. Always return the data as JSON
     return res.status(200).json(response.data);
 
   } catch (err) {
-    // 5. Catch-all: This ensures the browser sees a JSON error, not 'A server error...'
-    console.error("Login Error:", err.message);
+    // Return the actual error as JSON so test.html can display it
+    console.error("Token Acquisition Error:", err.message);
     return res.status(err.response?.status || 500).json({
       success: false,
       error: err.response?.data?.message || err.message,
-      detail: "Check Vercel Dashboard logs for 'Login Error' to see the trace."
+      hostUsed: process.env.NS_HOST
     });
   }
 }
