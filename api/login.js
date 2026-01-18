@@ -1,7 +1,7 @@
 const axios = require('axios');
 
 export default async function handler(req, res) {
-  // 1. Force JSON headers to prevent the HTML crash page
+  // Always return JSON to prevent the "Unexpected token A" error
   res.setHeader('Content-Type', 'application/json');
   res.setHeader('Access-Control-Allow-Origin', '*');
 
@@ -9,34 +9,31 @@ export default async function handler(req, res) {
 
   try {
     const { username, password } = req.body;
-    // CRITICAL: Token acquisition MUST use the central gateway
-    const host = process.env.NS_HOST || 'api.ringlogix.com';
-    const authUrl = `https://${host}/pbx/v1/oauth2/token/`;
+    const { NS_HOST, NS_CLIENT_ID, NS_CLIENT_SECRET } = process.env;
 
-    // 2. Format body as x-www-form-urlencoded
-    const params = new URLSearchParams();
-    params.append('grant_type', 'password');
-    params.append('client_id', '0-t41691-c291565-r291528'); // Confirmed from your Postman Result
-    params.append('client_secret', process.env.NS_CLIENT_SECRET);
-    params.append('username', username);
-    params.append('password', password);
+    const authUrl = `https://${NS_HOST}/pbx/v1/oauth2/token/`;
 
-    const response = await axios.post(authUrl, params.toString(), {
-      headers: { 
-        'Content-Type': 'application/x-www-form-urlencoded',
-        'Accept': 'application/json'
-      }
+    // Attempting the post with the parameters confirmed in your Postman test
+    const response = await axios.post(authUrl, {
+      grant_type: 'password',
+      client_id: NS_CLIENT_ID,
+      client_secret: NS_CLIENT_SECRET,
+      username: username,
+      password: password
+    }, {
+      headers: { 'Content-Type': 'application/json' }
     });
 
-    // 3. Success returns valid JSON to test.html
     return res.status(200).json(response.data);
 
   } catch (err) {
-    // 4. Return JSON error instead of HTML to stop the "Unexpected token 'A'" crash
-    console.error("Token Acquisition Failed:", err.response?.data || err.message);
+    // Log the actual error to Vercel logs for evaluation
+    console.error("Token Acquisition Error:", err.response?.data || err.message);
+    
     return res.status(err.response?.status || 500).json({
       success: false,
-      error: err.response?.data?.error_description || err.message
+      error: err.response?.data?.message || err.message,
+      detail: "Check Vercel environment variables for NS_CLIENT_ID and NS_CLIENT_SECRET"
     });
   }
 }
