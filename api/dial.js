@@ -11,13 +11,14 @@ export default async function handler(req, res) {
   const { NS_HOST } = process.env;
 
   try {
-    const dialUrl = `https://${NS_HOST}/pbx/v1/domains/${session.domain}/users/${session.extension}/calls/`;
+    // Standard NS v2 Call Control path
+    const dialUrl = `https://${NS_HOST}/ns-api/v2/domains/${session.domain}/users/${session.extension}/calls/`;
     
     const response = await axios.post(
       dialUrl,
       { 
         destination: toNumber,
-        device: `${session.extension}wp` 
+        device: `${session.extension}wp` // Logic: 101wp
       },
       {
         headers: { 
@@ -28,12 +29,10 @@ export default async function handler(req, res) {
     );
 
     return res.status(200).json({ success: true, data: response.data });
-
   } catch (err) {
-    console.error("Dial Error:", err.response?.data || err.message);
     return res.status(err.response?.status || 500).json({ 
       success: false, 
-      error: `Dial Failed: ${err.message}` 
+      error: err.response?.data?.message || err.message 
     });
   }
 }
