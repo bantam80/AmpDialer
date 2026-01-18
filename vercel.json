@@ -14,11 +14,11 @@
       "destination": "/widget/style.css"
     },
     {
-      "source": "/widget/(.*)",
-      "destination": "/widget/$1"
+      "source": "/",
+      "destination": "/widget/index.html"
     },
     {
-      "source": "/(.*)",
+      "source": "/widget",
       "destination": "/widget/index.html"
     }
   ],
