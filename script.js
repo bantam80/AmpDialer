@@ -18,10 +18,9 @@ function initWidget() {
         });
         ZOHO.embeddedApp.init();
     } else {
-        setTimeout(initWidget, 100); // Retry if SDK slow
+        setTimeout(initWidget, 100); 
     }
 }
-
 initWidget();
 
 /**
@@ -60,17 +59,14 @@ async function performLogin() {
     const user = document.getElementById("login-user").value;
     const pass = document.getElementById("login-pass").value;
     const status = document.getElementById("login-status");
-
     status.innerText = "Authenticating...";
 
     try {
-        // Pointing directly to root filename
-        const res = await fetch('/login', {
+        const res = await fetch('/login', { // Corrected root path
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ username: user, password: pass })
         });
-        
         const data = await res.json();
         if (data.access_token) {
             localStorage.setItem("amp_session", JSON.stringify(data));
@@ -79,19 +75,16 @@ async function performLogin() {
         } else {
             status.innerText = "Login Failed: Check credentials";
         }
-    } catch (e) {
-        status.innerText = "API Connection Error";
-    }
+    } catch (e) { status.innerText = "API Connection Error"; }
 }
 
 async function initiateCall() {
     const lead = leadQueue[currentIndex];
     const session = JSON.parse(localStorage.getItem("amp_session"));
     
-    // Pointing directly to root dial.js
-    // Uses 'crmapi' connection validated in diagnostic
+    // CORRECTION: Pointing to root dial endpoint via Zoho Connector
     ZOHO.CRM.CONNECTOR.invoke("crmapi", {
-        "url": "https://amp-dialer.vercel.app/dial",
+        "url": "https://amp-dialer.vercel.app/dial", 
         "method": "POST",
         "body": JSON.stringify({ 
             toNumber: lead.Phone || lead.Mobile, 
@@ -108,26 +101,13 @@ async function initiateCall() {
  */
 function updateLeadUI() {
     const nameEl = document.getElementById("entity-name");
-    const phoneEl = document.getElementById("entity-phone");
-    const countEl = document.getElementById("queue-count");
-
+    const phoneEl = document.getElementById("phone-display"); // Matched to HTML
     if (leadQueue.length > 0 && currentIndex < leadQueue.length) {
         const lead = leadQueue[currentIndex];
         nameEl.innerText = lead.Full_Name || "Unnamed Lead";
         phoneEl.innerText = lead.Phone || lead.Mobile || "No Number";
-        countEl.innerText = `Remaining: ${leadQueue.length - currentIndex}`;
-    } else {
-        nameEl.innerText = "Queue Empty";
-        phoneEl.innerText = "--";
     }
 }
-
 function skipLead() { currentIndex++; updateLeadUI(); }
-function showMainUI() { 
-    document.getElementById("login-screen").style.display = "none"; 
-    document.getElementById("main-ui").style.display = "block"; 
-}
-function showLogin() { 
-    document.getElementById("login-screen").style.display = "block"; 
-    document.getElementById("main-ui").style.display = "none"; 
-}
+function showMainUI() { document.getElementById("login-screen").style.display = "none"; document.getElementById("main-ui").style.display = "block"; }
+function showLogin() { document.getElementById("login-screen").style.display = "block"; document.getElementById("main-ui").style.display = "none"; }
