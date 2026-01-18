@@ -1,138 +1,83 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AmpDialer - Connectivity Test Bench</title>
+    <title>AmpDialer v1 Test</title>
     <style>
-        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; padding: 40px; line-height: 1.6; max-width: 600px; margin: auto; background-color: #f4f7f9; }
-        .card { border: 1px solid #e1e4e8; padding: 25px; border-radius: 12px; background: white; box-shadow: 0 4px 6px rgba(0,0,0,0.05); }
-        h2 { margin-top: 0; color: #1a1a1a; border-bottom: 2px solid #007bff; padding-bottom: 10px; }
-        label { display: block; font-weight: bold; margin-top: 15px; color: #444; }
-        input { width: 100%; padding: 12px; margin: 8px 0; box-sizing: border-box; border: 1px solid #ccc; border-radius: 6px; font-size: 16px; }
-        button { width: 100%; padding: 14px; color: white; border: none; cursor: pointer; font-weight: bold; border-radius: 6px; font-size: 16px; transition: opacity 0.2s; margin-top: 10px; }
-        .btn-auth { background: #28a745; }
-        .btn-status { background: #6c757d; }
-        .btn-dial { background: #007bff; }
-        button:disabled { background: #ccc; cursor: not-allowed; }
-        #log-area { margin-top: 20px; padding: 15px; border-radius: 6px; display: none; font-family: monospace; font-size: 14px; }
-        .success { background: #d1e7dd; color: #0f5132; border: 1px solid #badbcc; }
-        .error { background: #f8d7da; color: #842029; border: 1px solid #f5c2c7; }
-        .info { background: #e2e3e5; color: #41464b; border: 1px solid #d3d3d4; }
-        .status-badge { display: inline-block; padding: 4px 8px; border-radius: 4px; font-weight: bold; margin-top: 5px; }
+        body { font-family: sans-serif; padding: 20px; line-height: 1.6; }
+        .box { border: 1px solid #ccc; padding: 15px; margin-bottom: 10px; border-radius: 5px; }
+        input { padding: 8px; margin: 5px 0; width: 250px; display: block; }
+        button { padding: 10px 20px; cursor: pointer; background: #0070f3; color: white; border: none; border-radius: 5px; }
+        #status { font-weight: bold; margin-top: 10px; }
     </style>
 </head>
 <body>
+    <h2>AmpDialer Control Panel</h2>
 
-    <div class="card">
-        <h2>AmpDialer Test Bench</h2>
-        
-        <label>1. PBX Credentials</label>
-        <input type="text" id="user" placeholder="e.g. 101@291565" value="101@291565">
+    <div class="box">
+        <h3>Step 1: Authenticate</h3>
+        <input type="text" id="user" placeholder="101@291565">
         <input type="password" id="pass" placeholder="PBX Password">
-        <button class="btn-auth" onclick="testLogin()">Step 1: Authenticate</button>
-
-        <hr style="margin: 25px 0; border: 0; border-top: 1px solid #eee;">
-
-        <label>2. Device Health</label>
-        <p style="font-size: 0.9em; color: #666;">Check if your SNAP.Go (101wp) is online.</p>
-        <button id="statusBtn" class="btn-status" onclick="checkRegistration()" disabled>Step 2: Check 101wp Status</button>
-        <div id="reg-display" style="margin-top:10px; display:none;">
-            Device 101wp: <span id="reg-status" class="status-badge">Unknown</span>
-        </div>
-
-        <hr style="margin: 25px 0; border: 0; border-top: 1px solid #eee;">
-
-        <label>3. Test Outbound Dial</label>
-        <input type="text" id="target" placeholder="Target Phone (e.g. 17705551234)">
-        <button id="dialBtn" class="btn-dial" onclick="testDial()" disabled>Step 3: Execute Dial</button>
-        
-        <div id="log-area"></div>
+        <button onclick="testLogin()">Login</button>
     </div>
 
-    <script>
-        let sessionData = null;
-        const logArea = document.getElementById('log-area');
+    <div class="box">
+        <h3>Step 2: Execute Dial</h3>
+        <input type="text" id="phone" placeholder="17702893113">
+        <button onclick="testDial()">Click to Call</button>
+    </div>
 
-        function printLog(msg, type = 'info') {
-            logArea.style.display = "block";
-            logArea.className = type;
-            logArea.innerText = msg;
-        }
+    <div id="status">Ready</div>
+
+    <script>
+        let currentSession = null;
 
         async function testLogin() {
-            printLog("Authenticating with NetSapiens...");
+            const status = document.getElementById('status');
+            status.innerText = "Authenticating...";
+            
             try {
                 const res = await fetch('/api/login', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
-                        user: document.getElementById('user').value,
-                        pass: document.getElementById('pass').value
+                        username: document.getElementById('user').value,
+                        password: document.getElementById('pass').value
                     })
                 });
-                const data = await res.json();
-                if (data.success) {
-                    sessionData = data.session;
-                    document.getElementById('statusBtn').disabled = false;
-                    printLog("Authenticated! Session token received.", "success");
-                } else {
-                    printLog("Login Failed: " + data.error, "error");
-                }
-            } catch (e) {
-                printLog("Network Error: " + e.message, "error");
-            }
-        }
-
-        async function checkRegistration() {
-            const statusBadge = document.getElementById('reg-status');
-            const regDisplay = document.getElementById('reg-display');
-            printLog("Checking device registration...");
-            
-            try {
-                const query = `token=${sessionData.token}&domain=${sessionData.domain}&extension=${sessionData.extension}`;
-                const res = await fetch(`/api/status?${query}`);
-                const data = await res.json();
                 
-                regDisplay.style.display = "block";
-                if (data.success) {
-                    statusBadge.innerText = data.wpStatus;
-                    statusBadge.style.background = data.wpStatus === "Registered" ? "#28a745" : "#dc3545";
-                    statusBadge.style.color = "white";
-                    
-                    if (data.wpStatus === "Registered") {
-                        document.getElementById('dialBtn').disabled = false;
-                        printLog("Device is ONLINE. You can now test dialing.", "success");
-                    } else {
-                        printLog("Device 101wp is NOT Registered. Ensure SNAP.Go is open.", "error");
-                    }
+                const data = await res.json();
+                if (data.access_token) {
+                    currentSession = data;
+                    status.innerText = "Login Success! Token acquired.";
+                    status.style.color = "green";
                 } else {
-                    printLog("Status Check Failed: " + data.error, "error");
+                    status.innerText = "Login Failed: " + (data.error_description || data.error || "Unknown Error");
+                    status.style.color = "red";
                 }
             } catch (e) {
-                printLog("Error: " + e.message, "error");
+                status.innerText = "Network Error: " + e.message;
             }
         }
 
         async function testDial() {
-            printLog("Sending dial command to NetSapiens...");
+            if (!currentSession) return alert("Please login first!");
+            const status = document.getElementById('status');
+            status.innerText = "Initiating Call...";
+
             try {
                 const res = await fetch('/api/dial', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
-                        toNumber: document.getElementById('target').value,
-                        session: sessionData
+                        toNumber: document.getElementById('phone').value,
+                        session: currentSession
                     })
                 });
+
                 const data = await res.json();
-                if (data.success) {
-                    printLog("Success! Your SNAP.Go should be ringing now (Leg A). Answer it to begin dialing Leg B.", "success");
-                } else {
-                    printLog("Dial Error: " + data.error, "error");
-                }
+                status.innerText = "Response: " + JSON.stringify(data);
             } catch (e) {
-                printLog("Error: " + e.message, "error");
+                status.innerText = "Dial Error: " + e.message;
             }
         }
     </script>
