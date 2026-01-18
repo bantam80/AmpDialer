@@ -1,33 +1,38 @@
 import axios from 'axios';
 
 export default async function handler(req, res) {
-  // Handle CORS and Options
+  // 1. Set CORS headers manually to be safe
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+
   if (req.method === 'OPTIONS') {
     return res.status(200).end();
   }
 
-  const { user, pass } = req.body;
-
-  // Safety check: ensure variables exist
-  if (!process.env.NS_HOST || !process.env.NS_CLIENT_ID) {
+  // 2. Check for variables before doing anything
+  const { NS_HOST, NS_CLIENT_ID, NS_CLIENT_SECRET } = process.env;
+  if (!NS_HOST || !NS_CLIENT_ID || !NS_CLIENT_SECRET) {
     return res.status(500).json({ 
-        success: false, 
-        error: "Missing Vercel Environment Variables: NS_HOST or NS_CLIENT_ID" 
+      success: false, 
+      error: "Vercel Environment Variables are missing. Check NS_HOST, NS_CLIENT_ID, and NS_CLIENT_SECRET." 
     });
   }
 
   try {
-    // Using URLSearchParams (native to Node.js) instead of querystring
+    const { user, pass } = req.body;
+
+    // 3. Construct the request using URLSearchParams
     const params = new URLSearchParams();
     params.append('grant_type', 'password');
-    params.append('client_id', process.env.NS_CLIENT_ID);
-    params.append('client_secret', process.env.NS_CLIENT_SECRET);
+    params.append('client_id', NS_CLIENT_ID);
+    params.append('client_secret', NS_CLIENT_SECRET);
     params.append('username', user);
     params.append('password', pass);
 
     const response = await axios.post(
-      `https://${process.env.NS_HOST}/oauth/token`,
-      params,
+      `https://${NS_HOST}/oauth/token`,
+      params.toString(),
       {
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
       }
@@ -45,7 +50,8 @@ export default async function handler(req, res) {
     });
 
   } catch (err) {
-    console.error("NetSapiens Auth Error:", err.response?.data || err.message);
+    // This logs to the Vercel Dashboard Logs
+    console.error("NetSapiens Error:", err.response?.data || err.message);
     
     return res.status(401).json({ 
       success: false, 
