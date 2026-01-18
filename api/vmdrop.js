@@ -1,18 +1,28 @@
-import axios from 'axios';
-
 export default async function handler(req, res) {
+  res.setHeader('Content-Type', 'application/json');
+  res.setHeader('Access-Control-Allow-Origin', '*');
+
   if (req.method === 'OPTIONS') return res.status(200).end();
+
   const { callId, session } = req.body;
 
   try {
-    // Transfers the active call to the VM Drop feature code (*88)
-    await axios.patch(
-      `https://${process.env.NS_HOST}/apiv2/domains/${session.domain}/users/${session.extension}/calls/${callId}`,
-      { destination: '*88' }, 
-      { headers: { 'Authorization': `Bearer ${session.token}` } }
+    // Vercel Node 24.x uses native fetch for PATCH requests
+    const response = await fetch(
+      `https://api.ringlogix.com/apiv2/domains/${session.domain}/users/${session.user}/calls/${callId}`,
+      {
+        method: 'PATCH',
+        headers: { 
+          'Authorization': `Bearer ${session.access_token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ destination: '*88' }) 
+      }
     );
-    res.status(200).json({ success: true });
+
+    const data = await response.json();
+    return res.status(response.status).json(data);
   } catch (err) {
-    res.status(500).json({ success: false, error: err.message });
+    return res.status(500).json({ success: false, error: err.message });
   }
 }
