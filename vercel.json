@@ -1,17 +1,36 @@
 {
   "rewrites": [
-    { "source": "/", "destination": "/widget/index.html" },
-    { "source": "/widget/script.js", "destination": "/widget/script.js" },
-    { "source": "/widget/style.css", "destination": "/widget/style.css" },
-    { "source": "/(.*)", "destination": "/widget/$1" }
+    {
+      "source": "/api/(.*)",
+      "destination": "/api/$1"
+    },
+    {
+      "source": "/widget/(.*)",
+      "destination": "/widget/$1"
+    },
+    {
+      "source": "/script.js",
+      "destination": "/widget/script.js"
+    },
+    {
+      "source": "/style.css",
+      "destination": "/widget/style.css"
+    },
+    {
+      "source": "/",
+      "destination": "/widget/index.html"
+    },
+    {
+      "source": "/(.*)",
+      "destination": "/widget/index.html"
+    }
   ],
   "headers": [
     {
       "source": "/api/(.*)",
       "headers": [
         { "key": "Access-Control-Allow-Origin", "value": "*" },
-        { "key": "Access-Control-Allow-Methods", "value": "GET,POST,OPTIONS,PATCH" },
-        { "key": "Access-Control-Allow-Headers", "value": "Content-Type" }
+        { "key": "Access-Control-Allow-Headers", "value": "Authorization, Content-Type" }
       ]
     }
   ]
