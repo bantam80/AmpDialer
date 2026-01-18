@@ -17,23 +17,6 @@
         </div>
     </div>
 
-    <div id="main-ui" class="screen" style="display:none;">
-        <div class="header-card">
-            <select id="view-selector" onchange="loadViewData(this.value)">
-                <option value="">-- Switch View --</option>
-            </select>
-            <div id="queue-count">Leads: 0</div>
-        </div>
-        <div class="card">
-            <h3 id="entity-name">Ready</h3>
-            <p id="entity-phone">--</p>
-            <div class="actions">
-                <button onclick="initiateCall()" class="primary">Dial Lead</button>
-                <button onclick="skipLead()" class="secondary">Skip</button>
-            </div>
-        </div>
-    </div>
-
     <script src="./script.js"></script>
 </body>
 </html>
