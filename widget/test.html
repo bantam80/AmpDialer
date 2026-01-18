@@ -1,40 +1,55 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-    <title>AmpDialer v1 Test</title>
+    <meta charset="UTF-8">
+    <title>AmpDialer v1 | Admin Console</title>
     <style>
-        body { font-family: sans-serif; padding: 20px; line-height: 1.6; }
-        .box { border: 1px solid #ccc; padding: 15px; margin-bottom: 10px; border-radius: 5px; }
-        input { padding: 8px; margin: 5px 0; width: 250px; display: block; }
-        button { padding: 10px 20px; cursor: pointer; background: #0070f3; color: white; border: none; border-radius: 5px; }
-        #status { font-weight: bold; margin-top: 10px; }
+        :root { --primary: #0070f3; --success: #28a745; --error: #dc3545; --bg: #f4f7f9; }
+        body { font-family: -apple-system, sans-serif; background: var(--bg); padding: 40px; display: flex; justify-content: center; }
+        .container { width: 100%; max-width: 500px; background: white; padding: 30px; border-radius: 12px; box-shadow: 0 10px 25px rgba(0,0,0,0.05); }
+        h2 { margin-top: 0; color: #333; font-size: 22px; border-bottom: 2px solid var(--bg); padding-bottom: 10px; }
+        .section { margin-bottom: 25px; }
+        label { display: block; font-size: 12px; text-transform: uppercase; color: #666; margin-bottom: 5px; font-weight: bold; }
+        input { width: 100%; padding: 12px; margin-bottom: 15px; border: 1px solid #ddd; border-radius: 6px; box-sizing: border-box; font-size: 14px; }
+        button { width: 100%; padding: 12px; cursor: pointer; background: var(--primary); color: white; border: none; border-radius: 6px; font-weight: bold; transition: opacity 0.2s; }
+        button:disabled { opacity: 0.4; cursor: not-allowed; }
+        #status-bar { padding: 12px; border-radius: 6px; font-size: 13px; margin-top: 20px; background: var(--bg); border: 1px solid #eee; min-height: 20px; }
+        .badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 11px; margin-left: 10px; }
+        .online { background: #e6f4ea; color: var(--success); }
+        .offline { background: #fce8e6; color: var(--error); }
     </style>
 </head>
 <body>
-    <h2>AmpDialer Control Panel</h2>
+    <div class="container">
+        <h2>AmpDialer Control</h2>
 
-    <div class="box">
-        <h3>Step 1: Authenticate</h3>
-        <input type="text" id="user" placeholder="101@291565">
-        <input type="password" id="pass" placeholder="PBX Password">
-        <button onclick="testLogin()">Login</button>
+        <div class="section">
+            <label>PBX Credentials</label>
+            <input type="text" id="user" placeholder="Username (e.g. 101@domain)">
+            <input type="password" id="pass" placeholder="Password">
+            <button id="login-btn" onclick="runLogin()">Authenticate</button>
+        </div>
+
+        <div class="section">
+            <label>Outbound Destination</label>
+            <input type="text" id="phone" placeholder="17702893113">
+            <button id="dial-btn" onclick="runDial()" disabled>Place Call</button>
+        </div>
+
+        <div id="status-bar">System Ready.</div>
     </div>
-
-    <div class="box">
-        <h3>Step 2: Execute Dial</h3>
-        <input type="text" id="phone" placeholder="17702893113">
-        <button onclick="testDial()">Click to Call</button>
-    </div>
-
-    <div id="status">Ready</div>
 
     <script>
-        let currentSession = null;
+        let session = null;
 
-        async function testLogin() {
-            const status = document.getElementById('status');
-            status.innerText = "Authenticating...";
-            
+        function updateStatus(msg, type = '') {
+            const bar = document.getElementById('status-bar');
+            bar.innerText = msg;
+            bar.style.color = type === 'error' ? 'var(--error)' : (type === 'success' ? 'var(--success)' : '#333');
+        }
+
+        async function runLogin() {
+            updateStatus("Authenticating...");
             try {
                 const res = await fetch('/api/login', {
                     method: 'POST',
@@ -44,41 +59,51 @@
                         password: document.getElementById('pass').value
                     })
                 });
-                
                 const data = await res.json();
+                
                 if (data.access_token) {
-                    currentSession = data;
-                    status.innerText = "Login Success! Token acquired.";
-                    status.style.color = "green";
+                    session = data;
+                    updateStatus("✓ Authenticated. Checking device registration...", "success");
+                    await checkRegistration();
                 } else {
-                    status.innerText = "Login Failed: " + (data.error_description || data.error || "Unknown Error");
-                    status.style.color = "red";
+                    updateStatus("Login Failed: " + (data.error_description || "Invalid Credentials"), "error");
                 }
-            } catch (e) {
-                status.innerText = "Network Error: " + e.message;
-            }
+            } catch (e) { updateStatus("Error: " + e.message, "error"); }
         }
 
-        async function testDial() {
-            if (!currentSession) return alert("Please login first!");
-            const status = document.getElementById('status');
-            status.innerText = "Initiating Call...";
+        async function checkRegistration() {
+            try {
+                const res = await fetch('/api/status', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ session })
+                });
+                const data = await res.json();
+                
+                if (data.registered) {
+                    updateStatus("✓ System Online (Device Registered)", "success");
+                    document.getElementById('dial-btn').disabled = false;
+                } else {
+                    updateStatus("⚠ Warning: No Registered Devices Found", "error");
+                    document.getElementById('dial-btn').disabled = false; // Still allow dial for testing
+                }
+            } catch (e) { console.error("Status check failed", e); }
+        }
 
+        async function runDial() {
+            updateStatus("Initiating Call...");
             try {
                 const res = await fetch('/api/dial', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
                         toNumber: document.getElementById('phone').value,
-                        session: currentSession
+                        session: session
                     })
                 });
-
                 const data = await res.json();
-                status.innerText = "Response: " + JSON.stringify(data);
-            } catch (e) {
-                status.innerText = "Dial Error: " + e.message;
-            }
+                updateStatus("Call Triggered: " + (data.message || "OK"), "success");
+            } catch (e) { updateStatus("Dial Failed: " + e.message, "error"); }
         }
     </script>
 </body>
