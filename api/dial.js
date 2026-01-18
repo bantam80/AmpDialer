@@ -11,16 +11,16 @@ export default async function handler(req, res) {
   const { NS_HOST } = process.env;
 
   try {
-    // Aligned with the working /pbx/v1/ path from your login success
-    const dialUrl = `https://${NS_HOST}/pbx/v1/domains/${session.domain}/users/${session.extension}/calls`;
+    // Standard Call Control path for NS API v2
+    const dialUrl = `https://${NS_HOST}/ns-api/v2/domains/${session.domain}/users/${session.extension}/calls/`;
     
-    console.log(`Attempting Dial to: ${toNumber} via ${dialUrl} for device 101WP`);
+    console.log(`Dialing ${toNumber} via ${dialUrl}`);
 
     const response = await axios.post(
       dialUrl,
       { 
         destination: toNumber,
-        device: "101WP" // Explicitly targeting your specific device ID
+        device: `${session.extension}wp` // Dynamic: 101wp
       },
       {
         headers: { 
@@ -30,17 +30,15 @@ export default async function handler(req, res) {
       }
     );
 
-    return res.status(200).json({ 
-        success: true, 
-        data: response.data 
-    });
+    return res.status(200).json({ success: true, data: response.data });
 
   } catch (err) {
+    // If /ns-api/v2/ fails, let's log the error and consider /apiv2/ as a secondary fallback
     console.error("Dial Error Detail:", err.response?.data || err.message);
     
     return res.status(err.response?.status || 500).json({ 
       success: false, 
-      error: err.response?.data?.message || err.message 
+      error: `Status ${err.response?.status}: ${err.response?.data?.message || err.message}`
     });
   }
 }
