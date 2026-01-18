@@ -1,24 +1,33 @@
 let leadQueue = [];
 let currentIndex = 0;
 
-// Initialize Zoho SDK
-ZOHO.embeddedApp.on("PageLoad", function(data) {
-    const session = localStorage.getItem("amp_session");
-    if (session) {
-        showMainUI();
-        fetchCustomViews();
-        if (data && data.cvid) loadViewData(data.cvid);
+/**
+ * Initialization: Wait for SDK Handshake
+ */
+function initWidget() {
+    if (typeof ZOHO !== "undefined") {
+        ZOHO.embeddedApp.on("PageLoad", function(data) {
+            const session = localStorage.getItem("amp_session");
+            if (session) {
+                showMainUI();
+                fetchCustomViews();
+                if (data && data.cvid) loadViewData(data.cvid);
+            } else {
+                showLogin();
+            }
+        });
+        ZOHO.embeddedApp.init();
     } else {
-        showLogin();
+        setTimeout(initWidget, 100); // Retry if SDK slow
     }
-});
+}
 
-ZOHO.embeddedApp.init();
+initWidget();
 
-/* --- API CALLS --- */
-
+/**
+ * Data Actions
+ */
 function fetchCustomViews() {
-    // Verified working in your Deluge diagnostic
     ZOHO.CRM.API.getCustomViews({ Entity: "Leads" })
         .then(res => {
             const selector = document.getElementById("view-selector");
@@ -44,17 +53,9 @@ function loadViewData(cvid) {
         });
 }
 
-/* --- UI & ACTIONS --- */
-
-function updateLeadUI() {
-    if (leadQueue.length > 0 && currentIndex < leadQueue.length) {
-        const lead = leadQueue[currentIndex];
-        document.getElementById("entity-name").innerText = lead.Full_Name || "Unnamed Lead";
-        document.getElementById("entity-phone").innerText = lead.Phone || lead.Mobile || "No Number";
-        document.getElementById("queue-count").innerText = `Queue: ${leadQueue.length - currentIndex}`;
-    }
-}
-
+/**
+ * API Calls: Authenticate and Dial
+ */
 async function performLogin() {
     const user = document.getElementById("login-user").value;
     const pass = document.getElementById("login-pass").value;
@@ -63,22 +64,23 @@ async function performLogin() {
     status.innerText = "Authenticating...";
 
     try {
-        const res = await fetch('/api/login', {
+        // Pointing directly to root filename
+        const res = await fetch('/login', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ username: user, password: pass })
         });
+        
         const data = await res.json();
-
         if (data.access_token) {
             localStorage.setItem("amp_session", JSON.stringify(data));
             showMainUI();
             fetchCustomViews();
         } else {
-            status.innerText = "Error: " + (data.error || "Login Failed");
+            status.innerText = "Login Failed: Check credentials";
         }
     } catch (e) {
-        status.innerText = "Network Error";
+        status.innerText = "API Connection Error";
     }
 }
 
@@ -86,15 +88,38 @@ async function initiateCall() {
     const lead = leadQueue[currentIndex];
     const session = JSON.parse(localStorage.getItem("amp_session"));
     
-    // Using 'crmapi' connection validated in Deluge
+    // Pointing directly to root dial.js
+    // Uses 'crmapi' connection validated in diagnostic
     ZOHO.CRM.CONNECTOR.invoke("crmapi", {
-        "url": "https://amp-dialer.vercel.app/api/dial",
+        "url": "https://amp-dialer.vercel.app/dial",
         "method": "POST",
-        "body": JSON.stringify({ toNumber: lead.Phone || lead.Mobile, session: session })
-    }).then(res => {
+        "body": JSON.stringify({ 
+            toNumber: lead.Phone || lead.Mobile, 
+            session: session 
+        })
+    }).then(() => {
         currentIndex++;
         updateLeadUI();
     });
+}
+
+/**
+ * UI Utilities
+ */
+function updateLeadUI() {
+    const nameEl = document.getElementById("entity-name");
+    const phoneEl = document.getElementById("entity-phone");
+    const countEl = document.getElementById("queue-count");
+
+    if (leadQueue.length > 0 && currentIndex < leadQueue.length) {
+        const lead = leadQueue[currentIndex];
+        nameEl.innerText = lead.Full_Name || "Unnamed Lead";
+        phoneEl.innerText = lead.Phone || lead.Mobile || "No Number";
+        countEl.innerText = `Remaining: ${leadQueue.length - currentIndex}`;
+    } else {
+        nameEl.innerText = "Queue Empty";
+        phoneEl.innerText = "--";
+    }
 }
 
 function skipLead() { currentIndex++; updateLeadUI(); }
