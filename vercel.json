@@ -4,14 +4,6 @@
     {
       "source": "/api/(.*)",
       "destination": "/api/$1"
-    },
-    {
-      "source": "/widget",
-      "destination": "/widget/index.html"
-    },
-    {
-      "source": "/widget/(.*)",
-      "destination": "/widget/$1"
     }
   ],
   "headers": [
