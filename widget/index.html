@@ -2,27 +2,9 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AmpDialer | Zoho CRM Debug Mode</title>
+    <title>AmpDialer Debug Mode</title>
     <script src="https://js.zohostatic.com/zohocrm/v2/sdk/7.0.6/sdk.min.js"></script>
     <link rel="stylesheet" href="/widget/style.css">
-    <style>
-        /* Debug Panel Styling */
-        #debug-panel {
-            margin-top: 20px;
-            padding: 10px;
-            background: #222;
-            color: #00ff00;
-            font-family: monospace;
-            font-size: 11px;
-            border-radius: 4px;
-            max-height: 200px;
-            overflow-y: auto;
-            border-top: 3px solid #444;
-        }
-        .debug-entry { margin-bottom: 5px; border-bottom: 1px solid #333; padding-bottom: 2px; }
-        .debug-label { color: #aaa; font-weight: bold; }
-    </style>
 </head>
 <body>
     <div id="login-screen" class="screen">
@@ -36,14 +18,14 @@
     </div>
 
     <div id="main-ui" class="screen" style="display:none;">
-        <div class="header-card">
+        <div class="card">
             <select id="view-selector" onchange="loadViewData(this.value)">
-                <option value="">-- Switch View --</option>
+                <option value="">-- Select View --</option>
             </select>
             <div id="queue-count">Leads: 0</div>
         </div>
         <div class="card">
-            <h3 id="entity-name">Ready</h3>
+            <h3 id="entity-name">System Ready</h3>
             <p id="entity-phone">--</p>
             <div class="actions">
                 <button onclick="initiateCall()" class="primary">Dial Lead</button>
@@ -52,8 +34,8 @@
         </div>
     </div>
 
-    <div id="debug-panel">
-        <div class="debug-entry"><span class="debug-label">[System]:</span> Debug Console Initialized.</div>
+    <div id="debug-panel" style="background:#000; color:#0f0; padding:10px; font-family:monospace; font-size:10px; margin-top:20px; border-top:2px solid #333; max-height:150px; overflow-y:scroll;">
+        <div>[System] Diagnostics Active...</div>
     </div>
 
     <script src="/widget/script.js"></script>
