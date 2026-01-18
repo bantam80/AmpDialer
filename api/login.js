@@ -1,32 +1,22 @@
 import axios from 'axios';
 
 export default async function handler(req, res) {
-  // 1. Set CORS headers manually to be safe
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 
-  if (req.method === 'OPTIONS') {
-    return res.status(200).end();
-  }
+  if (req.method === 'OPTIONS') return res.status(200).end();
 
-  // 2. Check for variables before doing anything
   const { NS_HOST, NS_CLIENT_ID, NS_CLIENT_SECRET } = process.env;
-  if (!NS_HOST || !NS_CLIENT_ID || !NS_CLIENT_SECRET) {
-    return res.status(500).json({ 
-      success: false, 
-      error: "Vercel Environment Variables are missing. Check NS_HOST, NS_CLIENT_ID, and NS_CLIENT_SECRET." 
-    });
-  }
+  const { user, pass } = req.body;
 
   try {
-    const { user, pass } = req.body;
+    // 1. Create the Basic Auth header (ClientID:ClientSecret encoded to Base64)
+    const authHeader = Buffer.from(`${NS_CLIENT_ID}:${NS_CLIENT_SECRET}`).toString('base64');
 
-    // 3. Construct the request using URLSearchParams
+    // 2. Setup the body params
     const params = new URLSearchParams();
     params.append('grant_type', 'password');
-    params.append('client_id', NS_CLIENT_ID);
-    params.append('client_secret', NS_CLIENT_SECRET);
     params.append('username', user);
     params.append('password', pass);
 
@@ -34,10 +24,14 @@ export default async function handler(req, res) {
       `https://${NS_HOST}/oauth/token`,
       params.toString(),
       {
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
+        headers: { 
+          'Content-Type': 'application/x-www-form-urlencoded',
+          'Authorization': `Basic ${authHeader}`
+        }
       }
     );
 
+    // 3. Parse the extension and domain for later use in Dialing
     const [extension, domain] = user.split('@');
     
     return res.status(200).json({
@@ -50,12 +44,12 @@ export default async function handler(req, res) {
     });
 
   } catch (err) {
-    // This logs to the Vercel Dashboard Logs
-    console.error("NetSapiens Error:", err.response?.data || err.message);
+    // 4. Log the EXACT error from NetSapiens to your Vercel Dashboard
+    console.error("NetSapiens Response Error:", err.response?.data || err.message);
     
     return res.status(401).json({ 
       success: false, 
-      error: err.response?.data?.error_description || "Authentication failed" 
+      error: err.response?.data?.error_description || err.response?.data?.error || "Unauthorized" 
     });
   }
 }
