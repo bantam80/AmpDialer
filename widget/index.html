@@ -2,9 +2,9 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>AmpDialer Debug Mode</title>
+    <title>AmpDialer</title>
     <script src="https://js.zohostatic.com/zohocrm/v2/sdk/7.0.6/sdk.min.js"></script>
-    <link rel="stylesheet" href="/widget/style.css">
+    <link rel="stylesheet" href="style.css">
 </head>
 <body>
     <div id="login-screen" class="screen">
@@ -18,7 +18,7 @@
     </div>
 
     <div id="main-ui" class="screen" style="display:none;">
-        <div class="card">
+        <div class="header-card">
             <select id="view-selector" onchange="loadViewData(this.value)">
                 <option value="">-- Select View --</option>
             </select>
@@ -38,6 +38,6 @@
         <div>[System] Diagnostics Active...</div>
     </div>
 
-    <script src="/widget/script.js"></script>
+    <script src="script.js"></script>
 </body>
 </html>
