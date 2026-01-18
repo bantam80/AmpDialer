@@ -14,16 +14,12 @@
       "destination": "/widget/style.css"
     },
     {
-      "source": "/",
-      "destination": "/widget/index.html"
-    },
-    {
-      "source": "/widget",
-      "destination": "/widget/index.html"
-    },
-    {
       "source": "/widget/(.*)",
       "destination": "/widget/$1"
+    },
+    {
+      "source": "/(.*)",
+      "destination": "/widget/index.html"
     }
   ],
   "headers": [
