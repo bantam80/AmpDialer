@@ -1,40 +1,36 @@
-const axios = require('axios');
-
 export default async function handler(req, res) {
+  res.setHeader('Content-Type', 'application/json');
   res.setHeader('Access-Control-Allow-Origin', '*');
+
   if (req.method === 'OPTIONS') return res.status(200).end();
 
-  const { toNumber, session } = req.body;
-  const { NS_HOST } = process.env;
-
   try {
-    // V1 API URL with query params
+    const { toNumber, session } = req.body;
+    const { NS_HOST } = process.env;
+
     const dialUrl = `https://${NS_HOST}/pbx/v1/?object=call&action=call&format=json`;
-    
-    // Formatting the number into the required SIP URI format
-    const sipDestination = `sip:${toNumber}@${session.domain}`;
 
-    // Body MUST be URL encoded
-    const params = new URLSearchParams();
-    params.append('callid', `amp-${Date.now()}`);
-    params.append('uid', `${session.extension}@${session.domain}`);
-    params.append('destination', sipDestination);
+    // Format body as x-www-form-urlencoded for v1 API
+    const bodyParams = new URLSearchParams({
+      callid: `amp-${Date.now()}`,
+      uid: `${session.user}@${session.domain}`,
+      destination: `sip:${toNumber}@${session.domain}`
+    });
 
-    const response = await axios.post(dialUrl, params.toString(), {
-      headers: { 
-        'Authorization': `Bearer ${session.token}`,
+    const response = await fetch(dialUrl, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${session.access_token}`,
         'Content-Type': 'application/x-www-form-urlencoded',
         'Accept': 'application/json'
-      }
+      },
+      body: bodyParams.toString()
     });
 
-    return res.status(200).json({ success: true, data: response.data });
+    const data = await response.json();
+    return res.status(response.status).json(data);
 
   } catch (err) {
-    console.error("Dial Error:", err.response?.data || err.message);
-    return res.status(err.response?.status || 500).json({ 
-      success: false, 
-      error: err.response?.data?.message || err.message 
-    });
+    return res.status(500).json({ success: false, error: err.message });
   }
 }
