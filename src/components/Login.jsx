@@ -12,11 +12,13 @@ export default function Login({ onLogin }) {
     setError('');
 
     try {
+      // FIX: Must point to /api/login, matching your api/login.js file
       const res = await fetch('/api/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ username, password })
       });
+      
       const data = await res.json();
 
       if (res.ok) {
@@ -25,6 +27,7 @@ export default function Login({ onLogin }) {
         setError(data.message || 'Login failed');
       }
     } catch (err) {
+      console.error(err);
       setError('Network error. Check connection.');
     } finally {
       setLoading(false);
@@ -40,8 +43,9 @@ export default function Login({ onLogin }) {
 
         <form onSubmit={handleSubmit}>
           <div className="mb-4">
-            <label className="block mb-2 text-sm font-bold text-gray-700">Username</label>
+            <label htmlFor="login-user" className="block mb-2 text-sm font-bold text-gray-700">Username</label>
             <input 
+              id="login-user"
               type="text" 
               className="w-full px-3 py-2 border rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
               value={username}
@@ -50,8 +54,9 @@ export default function Login({ onLogin }) {
             />
           </div>
           <div className="mb-6">
-            <label className="block mb-2 text-sm font-bold text-gray-700">Password</label>
+            <label htmlFor="login-pass" className="block mb-2 text-sm font-bold text-gray-700">Password</label>
             <input 
+              id="login-pass"
               type="password" 
               className="w-full px-3 py-2 border rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
               value={password}
