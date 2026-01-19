@@ -23,8 +23,8 @@ export function useZohoQueue() {
     if (!hasZohoCRM) {
       console.warn("Zoho CRM SDK not available. Using mock queue in standalone mode.");
       setQueue([
-        { id: "mock1", Name: "Mock Lead 1", Phone: "7702893113", Company: "MockCo", Status: "New" },
-        { id: "mock2", Name: "Mock Lead 2", Phone: "7702893114", Company: "MockCo", Status: "New" }
+        { id: "mock1", Name: "Mock Lead 1", Phone: "7703774730", Company: "MockCo", Status: "New" },
+        { id: "mock2", Name: "Mock Lead 2", Phone: "4043693678", Company: "MockCo", Status: "New" }
       ]);
       setLoading(false);
       return;
