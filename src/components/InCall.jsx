@@ -164,30 +164,29 @@ async function ringlogixDisconnectAndWait({ session, activeCall }) {
   return { ok: true, disconnected: true, via: "timeout-fallback", lastSnapshot };
 }
 
-// More robust email extractor (handles casing / alternate keys)
-function extractEmail(lead) {
-  if (!lead || typeof lead !== "object") return "";
+async function buildLeadDetailUrlWithMailerFlag(leadId) {
+  if (!window?.ZOHO?.CRM?.CONFIG?.getOrgInfo) return null;
 
-  // Common direct keys used in this app + potential variations
-  const direct =
-    lead.Email ||
-    lead.email ||
-    lead.Email_ID ||
-    lead.email_id ||
-    lead.Secondary_Email ||
-    lead.secondary_email;
+  // Attempt to derive correct regional CRM domain + org id
+  const orgInfo = await window.ZOHO.CRM.CONFIG.getOrgInfo().catch(() => null);
 
-  if (typeof direct === "string" && direct.trim()) return direct.trim();
+  // org id can appear under different keys depending on SDK/version/tenant
+  const orgId =
+    orgInfo?.org_id ||
+    orgInfo?.zgid ||
+    orgInfo?.id ||
+    orgInfo?.organization_id ||
+    orgInfo?.organizationId ||
+    null;
 
-  // Case-insensitive scan: any key whose name is exactly "email" (ignoring case)
-  for (const k of Object.keys(lead)) {
-    if (String(k).toLowerCase() === "email") {
-      const v = lead[k];
-      if (typeof v === "string" && v.trim()) return v.trim();
-    }
-  }
+  // domain_name commonly represents the Zoho domain suffix (e.g., "zoho.com", "zoho.eu")
+  const domainName = orgInfo?.domain_name || orgInfo?.domainName || null;
 
-  return "";
+  if (!orgId) return null;
+
+  // Use the known Zoho record URL format, swapping the domain suffix when available :contentReference[oaicite:8]{index=8}
+  const host = domainName ? `https://crm.${domainName}` : "https://crm.zoho.com";
+  return `${host}/crm/org${orgId}/tab/Leads/${encodeURIComponent(leadId)}?amp_mailer=1`;
 }
 
 export default function InCall({ lead, session, activeCall, onEndCall }) {
@@ -211,8 +210,8 @@ export default function InCall({ lead, session, activeCall, onEndCall }) {
     []
   );
 
-  // FIX: Email must NEVER close widget or open lead record.
-  // Also: if email missing in lead object, log keys so we can see what Zoho returned.
+  // UPDATED: Send Email now opens Zoho Lead detail page in a new tab with ?amp_mailer=1
+  // The Zoho Client Script (Leads Detail Page onLoad) will detect that flag and call openMailer().
   async function handleSendEmail(e) {
     try {
       e?.preventDefault?.();
@@ -221,46 +220,35 @@ export default function InCall({ lead, session, activeCall, onEndCall }) {
       // ignore
     }
 
-    const to = extractEmail(lead);
-
-    if (!to) {
-      console.warn("Send Email: lead has no Email in queue object.", {
-        lead,
-        leadKeys: lead ? Object.keys(lead) : null
-      });
-
-      alert(
-        "No email address on this lead (in the queue payload).\n\n" +
-          "This usually means Email wasn't returned by the list fetch.\n" +
-          "Fix: ensure useZohoQueue fetchLeads() includes fields with Email."
-      );
+    const leadId = lead?.id;
+    if (!leadId) {
+      alert("No Lead ID available.");
       return;
     }
 
-    const mailSubject = `Following up: ${lead?.Name || "Lead"}`;
-
-    // 1) Try ZDK mailer (if present). This should not navigate away.
+    // Best UX: open a new tab to the lead record with the amp_mailer flag
     try {
-      if (window?.ZDK?.Client?.openMailer) {
-        await window.ZDK.Client.openMailer({ to, subject: mailSubject });
+      const url = await buildLeadDetailUrlWithMailerFlag(leadId);
+      if (url) {
+        window.open(url, "_blank", "noopener,noreferrer");
         return;
       }
     } catch (err) {
-      console.warn("ZDK.Client.openMailer failed; falling back to mailto:", err);
+      console.warn("Failed to build lead URL; falling back to UI.Record.open:", err);
     }
 
-    // 2) Safe fallback: external composer via mailto (does not close widget)
+    // Fallback: open the lead record via widget SDK (may open in the same window depending on Zoho UX) :contentReference[oaicite:9]{index=9}
     try {
-      const subjectEnc = encodeURIComponent(mailSubject);
-      const bodyEnc = encodeURIComponent(`Hi ${lead?.Name || ""},\n\n`);
-      const url = `mailto:${encodeURIComponent(to)}?subject=${subjectEnc}&body=${bodyEnc}`;
-      window.open(url, "_blank", "noopener,noreferrer");
-      return;
+      if (window?.ZOHO?.CRM?.UI?.Record?.open) {
+        await window.ZOHO.CRM.UI.Record.open({ Entity: "Leads", RecordID: String(leadId) });
+        alert("Lead opened. Use the native Send Email button in Zoho to email/log/templates.");
+        return;
+      }
     } catch (err) {
-      console.warn("mailto fallback failed:", err);
+      console.warn("ZOHO.CRM.UI.Record.open failed:", err);
     }
 
-    alert("Unable to open an email composer. Please email the lead manually.");
+    alert("Unable to open the Lead detail page automatically. Please open the Lead and use Zoho's Send Email button.");
   }
 
   async function handleSaveAndEnd() {
@@ -298,10 +286,8 @@ export default function InCall({ lead, session, activeCall, onEndCall }) {
       }
 
       if (note?.trim()) ops.push(addNoteCompat({ RecordID: lead.id, Title: "Dialer Note", Content: note.trim() }));
-
-      if (status && status !== lead.Status) {
+      if (status && status !== lead.Status)
         ops.push(updateRecordCompat({ Entity: "Leads", APIData: { id: lead.id, Lead_Status: status } }));
-      }
 
       const results = await Promise.allSettled(ops);
       const failures = results.filter((r) => r.status === "rejected");
@@ -386,7 +372,7 @@ export default function InCall({ lead, session, activeCall, onEndCall }) {
           onClick={(e) => handleSendEmail(e)}
           className="w-full py-3 text-white bg-blue-600 rounded hover:bg-blue-700 font-bold shadow"
         >
-          Send Email (does not close widget)
+          Send Email (Zoho Composer)
         </button>
       </div>
     </div>
