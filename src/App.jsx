@@ -18,15 +18,21 @@ export default function App() {
     typeof window.ZOHO.embeddedApp.init === "function";
 
   if (!hasZoho) {
-    console.warn("ZOHO SDK not available. App opened outside Zoho CRM widget context.");
+    console.warn("ZOHO SDK not available (standalone mode).");
     return;
   }
+
+  // ✅ Add PageLoad listener BEFORE init
+  window.ZOHO.embeddedApp.on("PageLoad", function (data) {
+    console.log("ZOHO PageLoad payload:", data);
+  });
 
   window.ZOHO.embeddedApp
     .init()
     .then(() => console.log("Zoho embeddedApp.init() OK"))
     .catch((e) => console.error("Zoho init failed", e));
 }, []);
+
 
   const { currentLead, loading, nextLead, isQueueFinished } = useZohoQueue();
 
