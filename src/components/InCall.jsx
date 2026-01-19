@@ -43,7 +43,7 @@ function pad2(n) {
   return String(n).padStart(2, '0');
 }
 
-// Zoho Calls commonly accepts Call_Duration as HH:mm for completed calls. :contentReference[oaicite:8]{index=8}
+// Zoho Calls commonly accepts Call_Duration as HH:mm for completed calls.
 function msToHHmm(ms) {
   const totalMinutes = Math.max(0, Math.round(ms / 60000));
   const hours = Math.floor(totalMinutes / 60);
@@ -52,7 +52,7 @@ function msToHHmm(ms) {
 }
 
 /**
- * Create a Call activity (module: Calls), linked to a Lead via What_Id + $se_module="Leads". :contentReference[oaicite:9]{index=9}
+ * Create a Call activity (module: Calls), linked to a Lead via What_Id + $se_module="Leads".
  */
 async function createCallForLead({ leadId, subject, startedAtIso, durationHHmm, resultText }) {
   const payloads = [
@@ -100,6 +100,22 @@ async function createCallForLead({ leadId, subject, startedAtIso, durationHHmm, 
   throw lastErr || new Error('Call insert failed');
 }
 
+/**
+ * Your /api/activeCalls upstreamBody is an array of objects like:
+ * [{ orig_callid, by_callid, term_callid, orig_call_info, term_call_info, ... }]
+ * We consider the call "still active" if any entry matches our callid on:
+ * - orig_callid OR by_callid OR term_callid
+ */
+function isCallStillActive(upstreamBody, callid) {
+  if (!callid) return false;
+  if (!Array.isArray(upstreamBody)) return false;
+
+  return upstreamBody.some((c) => {
+    if (!c) return false;
+    return c.orig_callid === callid || c.by_callid === callid || c.term_callid === callid;
+  });
+}
+
 async function ringlogixDisconnectAndWait({ session, activeCall }) {
   const token = session?.access_token;
   const uid = activeCall?.uid || session?.uid;
@@ -111,7 +127,7 @@ async function ringlogixDisconnectAndWait({ session, activeCall }) {
     );
   }
 
-  // 1) Disconnect active call (NetSapiens action=disconnect). :contentReference[oaicite:10]{index=10}
+  // 1) Disconnect the active call
   const discResp = await fetch('/api/hangup', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
@@ -119,10 +135,14 @@ async function ringlogixDisconnectAndWait({ session, activeCall }) {
   });
 
   let discJson = null;
-  try { discJson = await discResp.json(); } catch {}
+  try {
+    discJson = await discResp.json();
+  } catch {
+    discJson = null;
+  }
 
   if (!discResp.ok) {
-    // If call is already gone, treat as success so we can advance.
+    // If call is already gone, treat as success so we can proceed.
     const bodyText = JSON.stringify(discJson || {});
     const alreadyEndedHint =
       discResp.status === 404 ||
@@ -134,29 +154,47 @@ async function ringlogixDisconnectAndWait({ session, activeCall }) {
     }
   }
 
-  // 2) Poll Read Active Calls (NetSapiens action=read). :contentReference[oaicite:11]{index=11}
+  // 2) Poll active calls until this callid is gone (exact match against upstreamBody array)
   const started = Date.now();
-  const timeoutMs = 12000;
-  const pollEveryMs = 800;
+  const timeoutMs = 15000;
+  const pollEveryMs = 750;
+
+  let lastSnapshot = null;
 
   while (Date.now() - started < timeoutMs) {
     try {
       const r = await fetch(`/api/activeCalls?uid=${encodeURIComponent(uid)}`, {
         headers: { Authorization: `Bearer ${token}` }
       });
-      const j = await r.json().catch(() => null);
 
-      const haystack = JSON.stringify(j?.upstreamBody ?? j ?? {});
-      const stillThere = haystack.includes(callid);
-      if (!stillThere) return { ok: true, disconnected: true, via: 'polled-active-calls' };
+      const j = await r.json().catch(() => null);
+      lastSnapshot = j;
+
+      const upstreamBody = j?.upstreamBody;
+
+      // If upstreamBody isn't an array, fall back to "string includes" as a last resort.
+      if (!Array.isArray(upstreamBody)) {
+        const haystack = JSON.stringify(upstreamBody ?? j ?? {});
+        const stillThereFallback = haystack.includes(callid);
+        if (!stillThereFallback) return { ok: true, disconnected: true, via: 'polled-active-calls-fallback' };
+      } else {
+        const stillThere = isCallStillActive(upstreamBody, callid);
+        if (!stillThere) return { ok: true, disconnected: true, via: 'polled-active-calls' };
+      }
     } catch (e) {
       console.warn('activeCalls poll failed:', e);
+      // keep polling; transient failures happen
     }
 
-    await new Promise((r) => setTimeout(r, pollEveryMs));
+    await new Promise((res) => setTimeout(res, pollEveryMs));
   }
 
-  return { ok: true, disconnected: true, via: 'timeout-fallback' };
+  console.warn('Hangup wait timed out; proceeding anyway.', {
+    callid,
+    lastSnapshot
+  });
+
+  return { ok: true, disconnected: true, via: 'timeout-fallback', lastSnapshot };
 }
 
 export default function InCall({ lead, session, activeCall, onEndCall }) {
@@ -194,7 +232,7 @@ export default function InCall({ lead, session, activeCall, onEndCall }) {
       console.warn('ZDK.Client.openMailer failed; falling back to record open:', e);
     }
 
-    // Fallback: open lead record in a new tab; user clicks Send Email there. :contentReference[oaicite:12]{index=12}
+    // Fallback: open lead record in a new tab; user clicks Send Email there.
     try {
       const recApi = window?.ZOHO?.CRM?.UI?.Record;
       if (recApi?.open) {
@@ -211,7 +249,7 @@ export default function InCall({ lead, session, activeCall, onEndCall }) {
   const handleSaveAndEnd = async () => {
     setIsSaving(true);
 
-    // 0) Hangup first; do not advance until call ends
+    // 0) Hangup first; do not advance until the call is actually gone
     try {
       setIsHangingUp(true);
       await ringlogixDisconnectAndWait({ session, activeCall });
@@ -277,6 +315,13 @@ export default function InCall({ lead, session, activeCall, onEndCall }) {
       <div className="p-4 bg-blue-50 border-b">
         <h2 className="text-lg font-bold text-gray-800">In Call: {lead?.Name}</h2>
         <p className="text-sm text-blue-600 font-mono">{lead?.Phone}</p>
+        {activeCall?.callid ? (
+          <p className="text-xs text-gray-500 mt-1 font-mono">callid: {activeCall.callid}</p>
+        ) : (
+          <p className="text-xs text-orange-600 mt-1">
+            Warning: no callid captured (hangup/wait may not work for this call)
+          </p>
+        )}
       </div>
 
       <div className="p-6 space-y-4">
