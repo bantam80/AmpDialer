@@ -1,27 +1,25 @@
 import React, { useEffect, useState } from 'react';
 import { useZohoQueue } from './hooks/useZohoQueue';
-
-// Sub-components (Placeholders)
-const LoginScreen = ({ onLogin }) => <div>Login Form Here...</div>;
-const Loading = () => <div>Loading Queue...</div>;
-const Finished = () => <div>Queue Complete!</div>;
+import Login from './components/Login';
+import Dialer from './components/Dialer';
+import InCall from './components/InCall';
+import Disposition from './components/Disposition';
 
 export default function App() {
-  const [session, setSession] = useState(null); // Ringlogix Token
-  const [appState, setAppState] = useState('IDLE'); // IDLE, READY, CALLING, DISPOSITION
+  const [session, setSession] = useState(null); 
+  // States: IDLE, READY, CALLING, INCALL, DISPOSITION
+  const [appState, setAppState] = useState('IDLE'); 
   
-  // Initialize Zoho SDK
   useEffect(() => {
+    /* Initialize Zoho SDK */
     window.ZOHO.embeddedApp.init();
   }, []);
 
-  // Use our custom hook
   const { currentLead, loading, nextLead, isQueueFinished } = useZohoQueue();
 
-  // 1. Dial Handler
+  // 1. Dial Logic
   const handleDial = async () => {
     setAppState('CALLING');
-    
     try {
       const resp = await fetch('/api/dial', {
         method: 'POST',
@@ -37,14 +35,13 @@ export default function App() {
       });
 
       if (resp.status === 202) {
-        // Success -> Move to Disposition
-        // (Or In-Call if you have websocket events, but for now Disposition)
-        setAppState('DISPOSITION');
+        // Successful Dial -> Go to InCall
+        setAppState('INCALL');
       } else if (resp.status === 400 || resp.status === 404) {
-        // AUTO-JUNK LOGIC
-        await handleAutoJunk("Invalid Number / Unreachable");
+        handleAutoJunk("Invalid Number");
       } else if (resp.status === 401) {
-        setSession(null); // Logout
+        setSession(null); 
+        setAppState('IDLE');
         alert("Session Expired");
       } else {
         alert("Dial Failed");
@@ -56,64 +53,65 @@ export default function App() {
     }
   };
 
-  // 2. Auto-Junk Logic
+  // 2. Auto-Junk (Skip Logic)
   const handleAutoJunk = async (reason) => {
-    // A. Update Status
     await window.ZOHO.CRM.API.updateRecord({
       Entity: "Leads",
       APIData: { id: currentLead.id, Lead_Status: "Junk Lead" }
     });
-    // B. Add Note
+    // Add note
     await window.ZOHO.CRM.API.createRecord({
       Entity: "Notes",
       APIData: {
         Parent_Id: currentLead.id,
         Note_Title: "Dialer Error",
-        Note_Content: `Auto-skipped by AmpDialer. Reason: ${reason}`
+        Note_Content: "Auto-skipped: " + reason
       }
     });
-    // C. Skip
     nextLead();
     setAppState('READY');
   };
 
-  // 3. Disposition Handler
-  const handleDisposition = async (status) => {
-    await window.ZOHO.CRM.API.updateRecord({
-        Entity: "Leads",
-        APIData: { id: currentLead.id, Lead_Status: status }
-    });
+  // 3. End Call Handler
+  const handleEndCall = () => {
+    // Logic: InCall component handles the saving. 
+    // We just move the queue here.
     nextLead();
     setAppState('READY');
-  }
+  };
 
-  // RENDER LOGIC
-  if (!session) return <LoginScreen onLogin={setSession} />;
-  if (loading) return <Loading />;
-  if (isQueueFinished) return <Finished />;
+  // RENDER ROUTER
+  if (!session) return <Login onLogin={(s) => { setSession(s); setAppState('READY'); }} />;
+  if (loading) return <div className="p-10 text-center text-gray-500">Loading Queue...</div>;
+  if (isQueueFinished) return <div className="p-10 text-center text-green-600 font-bold">Queue Completed!</div>;
 
   return (
-    <div className="p-4">
-      <div className="card">
-        <h2>{currentLead.Name}</h2>
-        <p>{currentLead.Company}</p>
-        <p className="text-xl font-bold">{currentLead.Phone}</p>
-        
-        {appState === 'READY' && (
-             <button onClick={handleDial} className="btn-green">DIAL</button>
-        )}
+    <div className="min-h-screen bg-gray-100 p-4">
+      {appState === 'READY' && (
+        <Dialer lead={currentLead} onDial={handleDial} />
+      )}
 
-        {appState === 'CALLING' && <p>Dialing...</p>}
+      {appState === 'CALLING' && (
+         <div className="text-center mt-20 animate-pulse font-bold text-xl">Dialing {currentLead.Phone}...</div>
+      )}
 
-        {appState === 'DISPOSITION' && (
-            <div className="disposition-grid">
-                <button onClick={() => handleDisposition("Attempted to Contact")}>Attempted</button>
-                <button onClick={() => handleDisposition("Contact in Future")}>Future</button>
-                <button onClick={() => handleDisposition("Junk Lead")}>Junk</button>
-                {/* ... other buttons */}
-            </div>
-        )}
-      </div>
+      {appState === 'INCALL' && (
+        <InCall lead={currentLead} onEndCall={handleEndCall} />
+      )}
+
+      {appState === 'DISPOSITION' && (
+        <Disposition 
+           lead={currentLead} 
+           onSave={async (status) => {
+              await window.ZOHO.CRM.API.updateRecord({
+                 Entity: "Leads",
+                 APIData: { id: currentLead.id, Lead_Status: status }
+              });
+              nextLead();
+              setAppState('READY');
+           }} 
+        />
+      )}
     </div>
   );
 }
