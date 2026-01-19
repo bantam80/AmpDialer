@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useMemo, useState, useEffect } from "react";
 
 function getCrmApi() {
   const api = window?.ZOHO?.CRM?.API;
@@ -160,6 +160,7 @@ export default function InCall({ lead, session, activeCall, onEndCall }) {
   const [status, setStatus] = useState(lead?.Status || "");
   const [isSaving, setIsSaving] = useState(false);
   const [isHangingUp, setIsHangingUp] = useState(false);
+  const [leadUrl, setLeadUrl] = useState("#");
 
   const statusOptions = useMemo(
     () => [
@@ -175,44 +176,29 @@ export default function InCall({ lead, session, activeCall, onEndCall }) {
     []
   );
 
-  function handleOpenLead(e) {
-    // 1. Prevent bubbling to ensure widget does not close or navigate away
-    e.preventDefault();
-    e.stopPropagation();
-
-    // 2. Construct Base URL from referrer to match the current Org/Region
+  // Robustly determine the Lead URL on mount
+  useEffect(() => {
     let baseUrl = "";
     try {
-      const referrer = document.referrer || "";
-      // Regex captures everything up to ".../tab/Leads"
-      const match = referrer.match(/^(https:\/\/[^/]+\/crm\/([^/]+\/)?tab\/Leads)/i);
-      
-      if (match && match[1]) {
-        baseUrl = match[1];
-      }
-    } catch (err) {
-      console.warn("Could not parse referrer for URL construction", err);
-    }
-
-    if (!baseUrl) {
-        // Fallback: If URL construction fails, try the SDK
-        // This is less preferred because we can't guarantee it won't close the widget, 
-        // but it prevents a dead button.
-        try {
-            window.ZOHO.CRM.UI.Record.open({ Entity: "Leads", RecordID: lead.id, Target: "_blank" });
-        } catch(e) {
-            console.error("Standard open failed", e);
-            alert("Could not determine Lead URL.");
+        // Try to parse referrer to respect Org/Region (e.g. crm.zoho.eu / org123)
+        const referrer = document.referrer || "";
+        const match = referrer.match(/^(https:\/\/[^/]+\/crm\/([^/]+\/)?tab\/Leads)/i);
+        if (match && match[1]) {
+            baseUrl = match[1];
+        } else {
+            // Fallback: Use standard .com URL if we can't detect environment
+            // This is safer than an empty link
+            baseUrl = "https://crm.zoho.com/crm/tab/Leads";
         }
-        return;
+    } catch (e) {
+        baseUrl = "https://crm.zoho.com/crm/tab/Leads";
     }
 
-    // 3. Construct Clean URL (No Client Script Params)
-    const targetUrl = `${baseUrl}/${lead.id}`;
+    if (lead?.id) {
+        setLeadUrl(`${baseUrl}/${lead.id}`);
+    }
+  }, [lead]);
 
-    // 4. Open in new tab
-    window.open(targetUrl, "_blank", "noopener,noreferrer");
-  }
 
   async function handleSaveAndEnd() {
     setIsSaving(true);
@@ -314,13 +300,22 @@ export default function InCall({ lead, session, activeCall, onEndCall }) {
           {isSaving ? (isHangingUp ? "Hanging up..." : "Saving...") : "End Interaction & Next"}
         </button>
 
-        <button
-          type="button"
-          onClick={handleOpenLead}
-          className="w-full py-3 text-white bg-blue-600 rounded hover:bg-blue-700 font-bold shadow"
+        {/* Standard HTML Anchor used here. 
+            This bypasses JS execution stack focus stealing which causes standard buttons to close widgets.
+        */}
+        <a
+          href={leadUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="block w-full py-3 text-center text-white bg-blue-600 rounded hover:bg-blue-700 font-bold shadow no-underline"
+          onClick={(e) => {
+              // Only prevent bubbling to parent containers.
+              // Do NOT preventDefault, or the link won't open.
+              e.stopPropagation();
+          }}
         >
           Open Lead Record
-        </button>
+        </a>
       </div>
     </div>
   );
