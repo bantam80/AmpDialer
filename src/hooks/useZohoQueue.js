@@ -10,28 +10,42 @@ export function useZohoQueue() {
   const [viewId, setViewId] = useState(null);
   const [pageToken, setPageToken] = useState(null); // For >2000 records
   const [page, setPage] = useState(1); // For <2000 records
+  const hasZohoCRM =
+  typeof window !== "undefined" &&
+  window.ZOHO &&
+  window.ZOHO.CRM &&
+  window.ZOHO.CRM.API &&
+  window.ZOHO.CRM.META;
 
   // 1. Init & Get View ID
   useEffect(() => {
-    /* Assumes ZOHO.embeddedApp.init() ran in App.jsx.
-       We fetch the "Lead Source" view ID here.
-    */
-    async function initQueue() {
-      try {
-        const views = await window.ZOHO.CRM.META.getCustomViews({ module: "Leads" });
-        // LOGIC: Find view named "Lead Source" (or generic default)
-        const targetView = views.data.find(v => v.display_value === "Lead Source") || views.data[0];
-        
-        if(targetView) {
-            setViewId(targetView.id);
-            fetchLeads(targetView.id, 1, null);
-        }
-      } catch (e) {
-        console.error("Zoho View Load Error", e);
-      }
+  async function initQueue() {
+    if (!hasZohoCRM) {
+      console.warn("Zoho CRM SDK not available. Using mock queue in standalone mode.");
+      setQueue([
+        { id: "mock1", Name: "Mock Lead 1", Phone: "7702893113", Company: "MockCo", Status: "New" },
+        { id: "mock2", Name: "Mock Lead 2", Phone: "7702893114", Company: "MockCo", Status: "New" }
+      ]);
+      setLoading(false);
+      return;
     }
-    initQueue();
-  }, []);
+
+    try {
+      const views = await window.ZOHO.CRM.META.getCustomViews({ module: "Leads" });
+      const targetView =
+        views.data.find(v => v.display_value === "Lead Source") || views.data[0];
+      if (targetView) {
+        setViewId(targetView.id);
+        fetchLeads(targetView.id, 1, null);
+      }
+    } catch (e) {
+      console.error("Zoho View Load Error", e);
+      setLoading(false);
+    }
+  }
+  initQueue();
+}, []);
+
 
   // 2. Fetch Logic
   async function fetchLeads(cvid, pageNum, token) {
