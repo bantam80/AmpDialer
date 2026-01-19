@@ -11,9 +11,22 @@ export default function App() {
   const [appState, setAppState] = useState('IDLE'); 
   
   useEffect(() => {
-    /* Initialize Zoho SDK */
-    window.ZOHO.embeddedApp.init();
-  }, []);
+  const hasZoho =
+    typeof window !== "undefined" &&
+    window.ZOHO &&
+    window.ZOHO.embeddedApp &&
+    typeof window.ZOHO.embeddedApp.init === "function";
+
+  if (!hasZoho) {
+    console.warn("ZOHO SDK not available. App opened outside Zoho CRM widget context.");
+    return;
+  }
+
+  window.ZOHO.embeddedApp
+    .init()
+    .then(() => console.log("Zoho embeddedApp.init() OK"))
+    .catch((e) => console.error("Zoho init failed", e));
+}, []);
 
   const { currentLead, loading, nextLead, isQueueFinished } = useZohoQueue();
 
