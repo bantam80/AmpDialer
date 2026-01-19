@@ -1,49 +1,39 @@
-import React, { useMemo, useState } from 'react';
+// FILE: src/components/InCall.jsx
+import React, { useMemo, useState } from "react";
 
 function getCrmApi() {
   const api = window?.ZOHO?.CRM?.API;
-  if (!api) throw new Error('ZOHO.CRM.API not available');
+  if (!api) throw new Error("ZOHO.CRM.API not available");
   return api;
 }
 
 async function insertRecordCompat({ Entity, APIData }) {
   const api = getCrmApi();
-
-  if (typeof api.insertRecord === 'function') return api.insertRecord({ Entity, APIData });
-  if (typeof api.createRecord === 'function') return api.createRecord({ Entity, APIData });
-
-  console.error('Available ZOHO.CRM.API methods:', Object.keys(api));
-  throw new Error('No supported record-create method found (expected insertRecord).');
+  if (typeof api.insertRecord === "function") return api.insertRecord({ Entity, APIData });
+  if (typeof api.createRecord === "function") return api.createRecord({ Entity, APIData });
+  console.error("Available ZOHO.CRM.API methods:", Object.keys(api));
+  throw new Error("No supported record-create method found (expected insertRecord).");
 }
 
 async function updateRecordCompat({ Entity, APIData }) {
   const api = getCrmApi();
-  if (typeof api.updateRecord === 'function') return api.updateRecord({ Entity, APIData });
-  throw new Error('updateRecord not available');
+  if (typeof api.updateRecord === "function") return api.updateRecord({ Entity, APIData });
+  throw new Error("updateRecord not available");
 }
 
 async function addNoteCompat({ RecordID, Title, Content }) {
   const api = getCrmApi();
-
-  if (typeof api.addNotes === 'function') {
-    return api.addNotes({ Entity: 'Leads', RecordID, Title, Content });
-  }
-
+  if (typeof api.addNotes === "function") return api.addNotes({ Entity: "Leads", RecordID, Title, Content });
   return insertRecordCompat({
-    Entity: 'Notes',
-    APIData: {
-      Parent_Id: RecordID,
-      Note_Title: Title,
-      Note_Content: Content
-    }
+    Entity: "Notes",
+    APIData: { Parent_Id: RecordID, Note_Title: Title, Note_Content: Content }
   });
 }
 
 function pad2(n) {
-  return String(n).padStart(2, '0');
+  return String(n).padStart(2, "0");
 }
 
-// Zoho Calls commonly accepts Call_Duration as HH:mm for completed calls.
 function msToHHmm(ms) {
   const totalMinutes = Math.max(0, Math.round(ms / 60000));
   const hours = Math.floor(totalMinutes / 60);
@@ -51,35 +41,32 @@ function msToHHmm(ms) {
   return `${pad2(hours)}:${pad2(mins)}`;
 }
 
-/**
- * Create a Call activity (module: Calls), linked to a Lead via What_Id + $se_module="Leads".
- */
 async function createCallForLead({ leadId, subject, startedAtIso, durationHHmm, resultText }) {
   const payloads = [
     {
       Subject: subject,
-      Call_Type: 'Outbound',
-      '$se_module': 'Leads',
+      Call_Type: "Outbound",
+      "$se_module": "Leads",
       What_Id: leadId,
       Call_Start_Time: startedAtIso,
       Call_Duration: durationHHmm,
-      Outbound_Call_Status: 'Completed',
+      Outbound_Call_Status: "Completed",
       Call_Result: resultText
     },
     {
       Subject: subject,
-      Call_Type: 'Outbound',
-      '$se_module': 'Leads',
+      Call_Type: "Outbound",
+      "$se_module": "Leads",
       What_Id: leadId,
       Call_Start_Time: startedAtIso,
       Call_Duration: durationHHmm,
-      Outgoing_Call_Status: 'Completed',
+      Outgoing_Call_Status: "Completed",
       Call_Result: resultText
     },
     {
       Subject: subject,
-      Call_Type: 'Outbound',
-      '$se_module': 'Leads',
+      Call_Type: "Outbound",
+      "$se_module": "Leads",
       What_Id: leadId,
       Call_Start_Time: startedAtIso,
       Call_Duration: durationHHmm
@@ -89,31 +76,23 @@ async function createCallForLead({ leadId, subject, startedAtIso, durationHHmm, 
   let lastErr = null;
   for (let i = 0; i < payloads.length; i++) {
     try {
-      const resp = await insertRecordCompat({ Entity: 'Calls', APIData: payloads[i] });
-      console.log('Call insert OK (attempt ' + (i + 1) + '):', resp);
+      const resp = await insertRecordCompat({ Entity: "Calls", APIData: payloads[i] });
+      console.log("Call insert OK (attempt " + (i + 1) + "):", resp);
       return resp;
     } catch (e) {
       lastErr = e;
-      console.warn('Call insert failed (attempt ' + (i + 1) + '):', e);
+      console.warn("Call insert failed (attempt " + (i + 1) + "):", e);
     }
   }
-  throw lastErr || new Error('Call insert failed');
+  throw lastErr || new Error("Call insert failed");
 }
 
-/**
- * Your /api/activeCalls upstreamBody is an array of objects like:
- * [{ orig_callid, by_callid, term_callid, orig_call_info, term_call_info, ... }]
- * We consider the call "still active" if any entry matches our callid on:
- * - orig_callid OR by_callid OR term_callid
- */
 function isCallStillActive(upstreamBody, callid) {
   if (!callid) return false;
   if (!Array.isArray(upstreamBody)) return false;
-
-  return upstreamBody.some((c) => {
-    if (!c) return false;
-    return c.orig_callid === callid || c.by_callid === callid || c.term_callid === callid;
-  });
+  return upstreamBody.some(
+    (c) => c && (c.orig_callid === callid || c.by_callid === callid || c.term_callid === callid)
+  );
 }
 
 async function ringlogixDisconnectAndWait({ session, activeCall }) {
@@ -127,10 +106,9 @@ async function ringlogixDisconnectAndWait({ session, activeCall }) {
     );
   }
 
-  // 1) Disconnect the active call
-  const discResp = await fetch('/api/hangup', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+  const discResp = await fetch("/api/hangup", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
     body: JSON.stringify({ uid, callid })
   });
 
@@ -142,7 +120,6 @@ async function ringlogixDisconnectAndWait({ session, activeCall }) {
   }
 
   if (!discResp.ok) {
-    // If call is already gone, treat as success so we can proceed.
     const bodyText = JSON.stringify(discJson || {});
     const alreadyEndedHint =
       discResp.status === 404 ||
@@ -154,11 +131,9 @@ async function ringlogixDisconnectAndWait({ session, activeCall }) {
     }
   }
 
-  // 2) Poll active calls until this callid is gone (exact match against upstreamBody array)
   const started = Date.now();
   const timeoutMs = 15000;
   const pollEveryMs = 750;
-
   let lastSnapshot = null;
 
   while (Date.now() - started < timeoutMs) {
@@ -171,91 +146,98 @@ async function ringlogixDisconnectAndWait({ session, activeCall }) {
       lastSnapshot = j;
 
       const upstreamBody = j?.upstreamBody;
-
-      // If upstreamBody isn't an array, fall back to "string includes" as a last resort.
       if (!Array.isArray(upstreamBody)) {
         const haystack = JSON.stringify(upstreamBody ?? j ?? {});
         const stillThereFallback = haystack.includes(callid);
-        if (!stillThereFallback) return { ok: true, disconnected: true, via: 'polled-active-calls-fallback' };
+        if (!stillThereFallback) return { ok: true, disconnected: true, via: "polled-active-calls-fallback" };
       } else {
         const stillThere = isCallStillActive(upstreamBody, callid);
-        if (!stillThere) return { ok: true, disconnected: true, via: 'polled-active-calls' };
+        if (!stillThere) return { ok: true, disconnected: true, via: "polled-active-calls" };
       }
     } catch (e) {
-      console.warn('activeCalls poll failed:', e);
-      // keep polling; transient failures happen
+      console.warn("activeCalls poll failed:", e);
     }
-
     await new Promise((res) => setTimeout(res, pollEveryMs));
   }
 
-  console.warn('Hangup wait timed out; proceeding anyway.', {
-    callid,
-    lastSnapshot
-  });
-
-  return { ok: true, disconnected: true, via: 'timeout-fallback', lastSnapshot };
+  console.warn("Hangup wait timed out; proceeding anyway.", { callid, lastSnapshot });
+  return { ok: true, disconnected: true, via: "timeout-fallback", lastSnapshot };
 }
 
 export default function InCall({ lead, session, activeCall, onEndCall }) {
-  const [note, setNote] = useState('');
-  const [subject, setSubject] = useState('Call with ' + (lead?.Name || 'Lead'));
-  const [status, setStatus] = useState(lead?.Status || '');
+  const [note, setNote] = useState("");
+  const [subject, setSubject] = useState("Call with " + (lead?.Name || "Lead"));
+  const [status, setStatus] = useState(lead?.Status || "");
   const [isSaving, setIsSaving] = useState(false);
   const [isHangingUp, setIsHangingUp] = useState(false);
 
   const statusOptions = useMemo(
     () => [
-      'Attempted to Contact',
-      'Contact in Future',
-      'Junk Lead',
-      'Lost Lead',
-      'Not Contacted',
-      'Qualified',
-      'Not Qualified',
-      'Completed | Contacted'
+      "Attempted to Contact",
+      "Contact in Future",
+      "Junk Lead",
+      "Lost Lead",
+      "Not Contacted",
+      "Qualified",
+      "Not Qualified",
+      "Completed | Contacted"
     ],
     []
   );
 
-  const handleSendEmail = async () => {
-    const to = lead?.Email || lead?.email;
-    const mailSubject = `Following up: ${lead?.Name || 'Lead'}`;
-
-    // Best case: ZDK openMailer exists (often client-script context)
+  // FIX: Email must NEVER close the widget or open the lead record.
+  // - Stop click bubbling (prevents parent click handlers from firing).
+  // - Prefer Zoho mailer if available; otherwise use mailto: (external).
+  async function handleSendEmail(e) {
     try {
-      if (window?.ZDK?.Client?.openMailer && to) {
+      e?.preventDefault?.();
+      e?.stopPropagation?.();
+    } catch {
+      // ignore
+    }
+
+    const to = (lead?.Email || lead?.email || "").trim();
+    if (!to) {
+      alert("No email address on this lead.");
+      return;
+    }
+
+    const mailSubject = `Following up: ${lead?.Name || "Lead"}`;
+
+    // 1) Try Zoho/ZDK mailer (if present). This should not navigate away.
+    try {
+      if (window?.ZDK?.Client?.openMailer) {
         await window.ZDK.Client.openMailer({ to, subject: mailSubject });
         return;
       }
-    } catch (e) {
-      console.warn('ZDK.Client.openMailer failed; falling back to record open:', e);
+    } catch (err) {
+      console.warn("ZDK.Client.openMailer failed; falling back to mailto:", err);
     }
 
-    // Fallback: open lead record in a new tab; user clicks Send Email there.
+    // 2) Safe fallback: external composer via mailto (does not close widget)
     try {
-      const recApi = window?.ZOHO?.CRM?.UI?.Record;
-      if (recApi?.open) {
-        await recApi.open({ Entity: 'Leads', RecordID: lead.id, Target: '_blank' });
-        return;
-      }
-    } catch (e) {
-      console.warn('ZOHO.CRM.UI.Record.open failed:', e);
+      const subjectEnc = encodeURIComponent(mailSubject);
+      // Keep body minimal; you can expand later.
+      const bodyEnc = encodeURIComponent(`Hi ${lead?.Name || ""},\n\n`);
+      const url = `mailto:${encodeURIComponent(to)}?subject=${subjectEnc}&body=${bodyEnc}`;
+      window.open(url, "_blank", "noopener,noreferrer");
+      return;
+    } catch (err) {
+      console.warn("mailto fallback failed:", err);
     }
 
-    alert('Unable to open email composer automatically. Open the Lead record and click Send Email.');
-  };
+    alert("Unable to open an email composer. Please email the lead manually.");
+  }
 
-  const handleSaveAndEnd = async () => {
+  async function handleSaveAndEnd() {
     setIsSaving(true);
 
-    // 0) Hangup first; do not advance until the call is actually gone
     try {
       setIsHangingUp(true);
       await ringlogixDisconnectAndWait({ session, activeCall });
     } catch (e) {
-      console.error('Hangup failed:', e);
-      alert(`Hangup failed. Not advancing.\n\n${e?.message || e}`);
+      console.error("Hangup failed:", e);
+      alert(`Hangup failed. Not advancing.\n${e?.message || e}`);
       setIsHangingUp(false);
       setIsSaving(false);
       return;
@@ -266,12 +248,10 @@ export default function InCall({ lead, session, activeCall, onEndCall }) {
     try {
       const ops = [];
 
-      // 1) Log Call activity (Calls module)
       if (subject?.trim()) {
         const startedAtIso = activeCall?.startedAt || new Date().toISOString();
         const durationHHmm = msToHHmm(Date.now() - new Date(startedAtIso).getTime());
-        const resultText = status || 'Completed';
-
+        const resultText = status || "Completed";
         ops.push(
           createCallForLead({
             leadId: lead.id,
@@ -283,32 +263,25 @@ export default function InCall({ lead, session, activeCall, onEndCall }) {
         );
       }
 
-      // 2) Add Note
-      if (note?.trim()) {
-        ops.push(addNoteCompat({ RecordID: lead.id, Title: 'Dialer Note', Content: note.trim() }));
-      }
-
-      // 3) Update Lead status
-      if (status && status !== lead.Status) {
-        ops.push(updateRecordCompat({ Entity: 'Leads', APIData: { id: lead.id, Lead_Status: status } }));
-      }
+      if (note?.trim()) ops.push(addNoteCompat({ RecordID: lead.id, Title: "Dialer Note", Content: note.trim() }));
+      if (status && status !== lead.Status)
+        ops.push(updateRecordCompat({ Entity: "Leads", APIData: { id: lead.id, Lead_Status: status } }));
 
       const results = await Promise.allSettled(ops);
-      const failures = results.filter((r) => r.status === 'rejected');
-
+      const failures = results.filter((r) => r.status === "rejected");
       if (failures.length) {
-        console.error('Save failures:', failures);
-        alert('Some items failed to save (likely Call field requirements / picklists). Check console.');
+        console.error("Save failures:", failures);
+        alert("Some items failed to save (likely Calls field requirements/picklists). Check console.");
       }
 
       onEndCall();
     } catch (e) {
-      console.error('Error saving records:', e);
-      alert('Error saving data to Zoho. Check console.');
+      console.error("Error saving records:", e);
+      alert("Error saving data to Zoho. Check console.");
     } finally {
       setIsSaving(false);
     }
-  };
+  }
 
   return (
     <div className="max-w-lg mx-auto mt-4 bg-white rounded-lg shadow-xl border-t-4 border-blue-500">
@@ -334,8 +307,7 @@ export default function InCall({ lead, session, activeCall, onEndCall }) {
             onChange={(e) => setSubject(e.target.value)}
           />
           <p className="text-xs text-gray-500 mt-1">
-            This logs a <b>Call</b> activity (module: <code>Calls</code>) linked via <code>What_Id</code> +{' '}
-            <code>$se_module=Leads</code> (no <code>Who_Id</code>).
+            Logs a Call activity (module Calls) linked via What_Id + $se_module=Leads (no Who_Id).
           </p>
         </div>
 
@@ -370,15 +342,15 @@ export default function InCall({ lead, session, activeCall, onEndCall }) {
           disabled={isSaving}
           className="w-full py-3 mt-4 text-white bg-red-600 rounded hover:bg-red-700 font-bold shadow"
         >
-          {isSaving ? (isHangingUp ? 'Hanging up…' : 'Saving…') : 'End Interaction & Next'}
+          {isSaving ? (isHangingUp ? "Hanging up..." : "Saving...") : "End Interaction & Next"}
         </button>
 
         <button
           type="button"
-          onClick={handleSendEmail}
+          onClick={(e) => handleSendEmail(e)}
           className="w-full py-3 text-white bg-blue-600 rounded hover:bg-blue-700 font-bold shadow"
         >
-          Send Email (opens in Zoho)
+          Send Email (does not close widget)
         </button>
       </div>
     </div>
