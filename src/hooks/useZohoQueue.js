@@ -149,4 +149,33 @@ export function useZohoQueue({ zohoReady, initialCvid } = {}) {
         setLoading(false);
       }
     })();
-  }, [zohoReady, i]()
+  }, [zohoReady, initialCvid]);
+
+  const nextLead = async () => {
+    const nextIdx = currentIndex + 1;
+    setCurrentIndex(nextIdx);
+
+    const remaining = queue.length - nextIdx;
+    if (remaining < 20 && hasMore && selectedViewId) {
+      await fetchLeads({
+        cvid: selectedViewId,
+        pageNum: page || 1,
+        token: pageToken
+      });
+    }
+  };
+
+  const isQueueFinished = !loading && !currentLead && !hasMore;
+
+  return {
+    views,
+    selectedViewId,
+    setActiveView,
+
+    currentLead,
+    loading,
+    nextLead,
+    queueRemaining,
+    isQueueFinished
+  };
+}
