@@ -31,40 +31,58 @@ export default function App() {
   const { currentLead, loading, nextLead, isQueueFinished } = useZohoQueue();
 
   // 1. Dial Logic
-  const handleDial = async () => {
-    setAppState('CALLING');
-    try {
-      const resp = await fetch('/api/dial', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${session.access_token}`
-        },
-        body: JSON.stringify({
-          uid: session.uid,
-          domain: session.domain,
-          destination: currentLead.Phone
-        })
-      });
+  const handleDial = async (lead) => {
+  try {
+    setErrorMessage("");
 
-      if (resp.status === 202) {
-        // Successful Dial -> Go to InCall
-        setAppState('INCALL');
-      } else if (resp.status === 400 || resp.status === 404) {
-        handleAutoJunk("Invalid Number");
-      } else if (resp.status === 401) {
-        setSession(null); 
-        setAppState('IDLE');
-        alert("Session Expired");
-      } else {
-        alert("Dial Failed");
-        setAppState('READY');
-      }
-    } catch (e) {
-      console.error(e);
-      setAppState('READY');
+    // Basic guard: need session + lead phone
+    if (!session?.access_token) {
+      setErrorMessage("No active session. Please log in again.");
+      setAppState("LOGIN");
+      return;
     }
-  };
+    if (!lead?.Phone) {
+      setErrorMessage("Lead has no phone number.");
+      setAppState("DISPOSITION");
+      return;
+    }
+
+    const payload = {
+      uid: session.uid,
+      domain: session.domain,
+      destination: lead.Phone.replace(/\D/g, ""), // keep digits only (expect 10-digit here)
+    };
+
+    const resp = await fetch("/api/dial", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${session.access_token}`,
+      },
+      body: JSON.stringify(payload),
+    });
+
+    const data = await resp.json().catch(() => ({}));
+
+    // Contract: our API returns 200 on success with { ok:true, upstreamStatus:202 }
+    // and returns upstream status on failure with { ok:false, upstreamStatus:401, ... }
+    if (data.ok === true) {
+      setCallId(data.callid || null);
+      setCurrentLead(lead);
+      setAppState("INCALL");
+      return;
+    }
+
+    // Failure path
+    const upstream = data.upstreamStatus ? ` (upstream ${data.upstreamStatus})` : "";
+    setErrorMessage((data.error || "Dial failed") + upstream);
+    setAppState("DISPOSITION");
+  } catch (e) {
+    setErrorMessage("Dial failed due to network/server error.");
+    setAppState("DISPOSITION");
+  }
+};
+
 
   // 2. Auto-Junk (Skip Logic)
   const handleAutoJunk = async (reason) => {
