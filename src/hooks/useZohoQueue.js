@@ -47,7 +47,7 @@ export function useZohoQueue({ zohoReady, initialCvid } = {}) {
   }
 
   async function fetchViews() {
-    const resp = await window.ZOHO.CRM.META.getCustomViews({ module: 'Leads' });
+    const resp = await window.ZOHO.CRM.META.getCustomViews({ Entity: 'Leads' });
     const list = resp?.data || [];
     setViews(list);
     return list;
