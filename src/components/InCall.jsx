@@ -175,16 +175,13 @@ export default function InCall({ lead, session, activeCall, onEndCall }) {
     []
   );
 
-  function handleSendEmail(e) {
-    // 1. Prevent bubbling so widget doesn't close or navigate
+  function handleOpenLead(e) {
+    // 1. Prevent bubbling to ensure widget does not close or navigate away
     e.preventDefault();
     e.stopPropagation();
 
-    // 2. Try to construct the correct Zoho URL to trigger the Client Script
-    // We use document.referrer (the parent page) to grab the base URL (Region + Org)
-    // Example Referrer: https://crm.zoho.com/crm/org12345/tab/Leads/CustomViewID
+    // 2. Construct Base URL from referrer to match the current Org/Region
     let baseUrl = "";
-    
     try {
       const referrer = document.referrer || "";
       // Regex captures everything up to ".../tab/Leads"
@@ -198,20 +195,20 @@ export default function InCall({ lead, session, activeCall, onEndCall }) {
     }
 
     if (!baseUrl) {
-        // Fallback: If we can't find the URL, warn the user we can't auto-open the composer
-        alert("Unable to detect Zoho URL to auto-launch mailer.\nPlease use the standard 'Send Email' button on the Lead record.");
-        
-        // Open standard record as backup (will not trigger script, but prevents dead end)
+        // Fallback: If URL construction fails, try the SDK
+        // This is less preferred because we can't guarantee it won't close the widget, 
+        // but it prevents a dead button.
         try {
             window.ZOHO.CRM.UI.Record.open({ Entity: "Leads", RecordID: lead.id, Target: "_blank" });
         } catch(e) {
             console.error("Standard open failed", e);
+            alert("Could not determine Lead URL.");
         }
         return;
     }
 
-    // 3. Construct URL with the query param your Client Script looks for
-    const targetUrl = `${baseUrl}/${lead.id}?amp_mailer=1`;
+    // 3. Construct Clean URL (No Client Script Params)
+    const targetUrl = `${baseUrl}/${lead.id}`;
 
     // 4. Open in new tab
     window.open(targetUrl, "_blank", "noopener,noreferrer");
@@ -319,10 +316,10 @@ export default function InCall({ lead, session, activeCall, onEndCall }) {
 
         <button
           type="button"
-          onClick={handleSendEmail}
+          onClick={handleOpenLead}
           className="w-full py-3 text-white bg-blue-600 rounded hover:bg-blue-700 font-bold shadow"
         >
-          Send Email (Opens Zoho Tab)
+          Open Lead Record
         </button>
       </div>
     </div>
