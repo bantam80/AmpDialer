@@ -5,6 +5,10 @@ import Dialer from './components/Dialer';
 import InCall from './components/InCall';
 import Disposition from './components/Disposition';
 
+const [zohoReady, setZohoReady] = useState(false);
+const [detectedCvid, setDetectedCvid] = useState(null);
+
+
 export default function App() {
   const [session, setSession] = useState(null); 
   // States: IDLE, READY, CALLING, INCALL, DISPOSITION
@@ -22,16 +26,20 @@ export default function App() {
     return;
   }
 
-  // ✅ Add PageLoad listener BEFORE init
   window.ZOHO.embeddedApp.on("PageLoad", function (data) {
     console.log("ZOHO PageLoad payload:", data);
+    if (data?.cvid) setDetectedCvid(String(data.cvid));
   });
 
   window.ZOHO.embeddedApp
     .init()
-    .then(() => console.log("Zoho embeddedApp.init() OK"))
+    .then(() => {
+      console.log("Zoho embeddedApp.init() OK");
+      setZohoReady(true);
+    })
     .catch((e) => console.error("Zoho init failed", e));
 }, []);
+
 
 
   const { currentLead, loading, nextLead, isQueueFinished } = useZohoQueue();
