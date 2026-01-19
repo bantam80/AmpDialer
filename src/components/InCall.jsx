@@ -253,4 +253,142 @@ export default function InCall({ lead, session, activeCall, onEndCall }) {
     try {
       const subjectEnc = encodeURIComponent(mailSubject);
       const bodyEnc = encodeURIComponent(`Hi ${lead?.Name || ""},\n\n`);
-      const url = `mailto:${encodeURIComponent(to)}?subject=${subjectEnc}&body
+      const url = `mailto:${encodeURIComponent(to)}?subject=${subjectEnc}&body=${bodyEnc}`;
+      window.open(url, "_blank", "noopener,noreferrer");
+      return;
+    } catch (err) {
+      console.warn("mailto fallback failed:", err);
+    }
+
+    alert("Unable to open an email composer. Please email the lead manually.");
+  }
+
+  async function handleSaveAndEnd() {
+    setIsSaving(true);
+
+    try {
+      setIsHangingUp(true);
+      await ringlogixDisconnectAndWait({ session, activeCall });
+    } catch (e) {
+      console.error("Hangup failed:", e);
+      alert(`Hangup failed. Not advancing.\n${e?.message || e}`);
+      setIsHangingUp(false);
+      setIsSaving(false);
+      return;
+    } finally {
+      setIsHangingUp(false);
+    }
+
+    try {
+      const ops = [];
+
+      if (subject?.trim()) {
+        const startedAtIso = activeCall?.startedAt || new Date().toISOString();
+        const durationHHmm = msToHHmm(Date.now() - new Date(startedAtIso).getTime());
+        const resultText = status || "Completed";
+        ops.push(
+          createCallForLead({
+            leadId: lead.id,
+            subject: subject.trim(),
+            startedAtIso,
+            durationHHmm,
+            resultText
+          })
+        );
+      }
+
+      if (note?.trim()) ops.push(addNoteCompat({ RecordID: lead.id, Title: "Dialer Note", Content: note.trim() }));
+
+      if (status && status !== lead.Status) {
+        ops.push(updateRecordCompat({ Entity: "Leads", APIData: { id: lead.id, Lead_Status: status } }));
+      }
+
+      const results = await Promise.allSettled(ops);
+      const failures = results.filter((r) => r.status === "rejected");
+      if (failures.length) {
+        console.error("Save failures:", failures);
+        alert("Some items failed to save (likely Calls field requirements/picklists). Check console.");
+      }
+
+      onEndCall();
+    } catch (e) {
+      console.error("Error saving records:", e);
+      alert("Error saving data to Zoho. Check console.");
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  return (
+    <div className="max-w-lg mx-auto mt-4 bg-white rounded-lg shadow-xl border-t-4 border-blue-500">
+      <div className="p-4 bg-blue-50 border-b">
+        <h2 className="text-lg font-bold text-gray-800">In Call: {lead?.Name}</h2>
+        <p className="text-sm text-blue-600 font-mono">{lead?.Phone}</p>
+        {activeCall?.callid ? (
+          <p className="text-xs text-gray-500 mt-1 font-mono">callid: {activeCall.callid}</p>
+        ) : (
+          <p className="text-xs text-orange-600 mt-1">
+            Warning: no callid captured (hangup/wait may not work for this call)
+          </p>
+        )}
+      </div>
+
+      <div className="p-6 space-y-4">
+        <div>
+          <label className="block text-xs font-bold text-gray-500 uppercase">Call Subject</label>
+          <input
+            type="text"
+            className="w-full p-2 mt-1 border rounded"
+            value={subject}
+            onChange={(e) => setSubject(e.target.value)}
+          />
+          <p className="text-xs text-gray-500 mt-1">
+            Logs a Call activity (module Calls) linked via What_Id + $se_module=Leads (no Who_Id).
+          </p>
+        </div>
+
+        <div>
+          <label className="block text-xs font-bold text-gray-500 uppercase">Add Note</label>
+          <textarea
+            className="w-full p-2 mt-1 border rounded h-24"
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+            placeholder="Type notes here..."
+          />
+        </div>
+
+        <div>
+          <label className="block text-xs font-bold text-gray-500 uppercase">Update Disposition</label>
+          <select
+            className="w-full p-2 mt-1 border rounded bg-white"
+            value={status}
+            onChange={(e) => setStatus(e.target.value)}
+          >
+            <option value="">-- Select Status --</option>
+            {statusOptions.map((opt) => (
+              <option key={opt} value={opt}>
+                {opt}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <button
+          onClick={handleSaveAndEnd}
+          disabled={isSaving}
+          className="w-full py-3 mt-4 text-white bg-red-600 rounded hover:bg-red-700 font-bold shadow"
+        >
+          {isSaving ? (isHangingUp ? "Hanging up..." : "Saving...") : "End Interaction & Next"}
+        </button>
+
+        <button
+          type="button"
+          onClick={(e) => handleSendEmail(e)}
+          className="w-full py-3 text-white bg-blue-600 rounded hover:bg-blue-700 font-bold shadow"
+        >
+          Send Email (does not close widget)
+        </button>
+      </div>
+    </div>
+  );
+}
