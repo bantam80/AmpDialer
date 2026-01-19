@@ -6,7 +6,6 @@ function getCrmApi() {
   return api;
 }
 
-// Compatibility layer: some SDK builds have insertRecord/addNotes, not createRecord
 async function insertRecordCompat({ Entity, APIData }) {
   const api = getCrmApi();
 
@@ -14,7 +13,7 @@ async function insertRecordCompat({ Entity, APIData }) {
     return api.insertRecord({ Entity, APIData });
   }
 
-  // Fallback only if your build actually has createRecord
+  // Rare fallback
   if (typeof api.createRecord === 'function') {
     return api.createRecord({ Entity, APIData });
   }
@@ -23,15 +22,23 @@ async function insertRecordCompat({ Entity, APIData }) {
   throw new Error('No supported record-create method found (expected insertRecord).');
 }
 
+async function updateRecordCompat({ Entity, APIData }) {
+  const api = getCrmApi();
+  if (typeof api.updateRecord === 'function') return api.updateRecord({ Entity, APIData });
+
+  console.error('Available API methods:', Object.keys(api));
+  throw new Error('updateRecord is not available in this SDK build.');
+}
+
 async function addNoteCompat({ Entity, RecordID, Title, Content }) {
   const api = getCrmApi();
 
-  // Preferred: addNotes attaches to the record directly
+  // Preferred method in many widget SDK builds
   if (typeof api.addNotes === 'function') {
     return api.addNotes({ Entity, RecordID, Title, Content });
   }
 
-  // Fallback: try inserting into Notes module (not always enabled in every build)
+  // Fallback: insert into Notes module
   return insertRecordCompat({
     Entity: 'Notes',
     APIData: {
@@ -42,15 +49,61 @@ async function addNoteCompat({ Entity, RecordID, Title, Content }) {
   });
 }
 
-async function updateRecordCompat({ Entity, APIData }) {
-  const api = getCrmApi();
+// ---- Task creation that works with Leads ----
+// Key change: link using What_Id + $se_module="Leads" (common requirement). :contentReference[oaicite:1]{index=1}
+async function createTaskForLead({ leadId, subject }) {
+  const today = new Date();
+  const yyyy = today.getFullYear();
+  const mm = String(today.getMonth() + 1).padStart(2, '0');
+  const dd = String(today.getDate()).padStart(2, '0');
+  const dueDate = `${yyyy}-${mm}-${dd}`;
 
-  if (typeof api.updateRecord === 'function') {
-    return api.updateRecord({ Entity, APIData });
+  // We’ll try a few variants because each Zoho org can have different picklist values for Status/Priority.
+  const attempts = [
+    {
+      Subject: subject,
+      '$se_module': 'Leads',
+      What_Id: leadId,
+      Due_Date: dueDate,
+      Status: 'Completed',
+      Priority: 'Normal'
+    },
+    {
+      Subject: subject,
+      '$se_module': 'Leads',
+      What_Id: leadId,
+      Due_Date: dueDate,
+      Status: 'Not Started',
+      Priority: 'Normal'
+    },
+    {
+      Subject: subject,
+      '$se_module': 'Leads',
+      What_Id: leadId,
+      Due_Date: dueDate
+    }
+  ];
+
+  let lastErr = null;
+
+  for (let i = 0; i < attempts.length; i++) {
+    try {
+      const resp = await insertRecordCompat({
+        Entity: 'Tasks',
+        APIData: attempts[i]
+      });
+
+      // Many Zoho APIs return {data:[{code, message, status, details...}]}
+      // We won’t over-parse; just log it for visibility.
+      console.log('Task insert response (attempt ' + (i + 1) + '):', resp);
+      return { ok: true, resp };
+    } catch (e) {
+      lastErr = e;
+      console.warn('Task insert failed (attempt ' + (i + 1) + '):', e);
+    }
   }
 
-  console.error('Available API methods:', Object.keys(api));
-  throw new Error('updateRecord is not available in this SDK build.');
+  return { ok: false, error: lastErr };
 }
 
 export default function InCall({ lead, onEndCall }) {
@@ -73,33 +126,24 @@ export default function InCall({ lead, onEndCall }) {
     []
   );
 
-  const handleDropVM = async () => {
-    alert('Voicemail drop triggered (Mock)');
-  };
-
   const handleSaveAndEnd = async () => {
     setIsSaving(true);
 
     try {
-      // Build a list of operations; run them in parallel but don’t fail the entire “Next” on one error.
       const ops = [];
 
-      // A) Task
+      // 1) Task (robust + retries)
       if (subject?.trim()) {
         ops.push(
-          insertRecordCompat({
-            Entity: 'Tasks',
-            APIData: {
-              Subject: subject.trim(),
-              Who_Id: lead.id, // If this ever fails, we’ll adjust to What_Id / $se_module based on your org config
-              Status: 'Completed',
-              Priority: 'Normal'
-            }
-          })
+          (async () => {
+            const r = await createTaskForLead({ leadId: lead.id, subject: subject.trim() });
+            if (!r.ok) throw r.error;
+            return r;
+          })()
         );
       }
 
-      // B) Note
+      // 2) Note
       if (note?.trim()) {
         ops.push(
           addNoteCompat({
@@ -111,7 +155,7 @@ export default function InCall({ lead, onEndCall }) {
         );
       }
 
-      // C) Update Lead Status
+      // 3) Lead Status
       if (status && status !== lead.Status) {
         ops.push(
           updateRecordCompat({
@@ -126,7 +170,10 @@ export default function InCall({ lead, onEndCall }) {
 
       if (failures.length) {
         console.error('Save failures:', failures);
-        alert('Some items failed to save. Check console for details. Moving to next lead anyway.');
+
+        // Helpful debug: show the FIRST failure clearly
+        const first = failures[0];
+        alert('Some items failed to save (likely Task). Notes/Status may still be saved. Check console.');
       }
 
       onEndCall();
@@ -145,13 +192,6 @@ export default function InCall({ lead, onEndCall }) {
           <h2 className="text-lg font-bold text-gray-800">In Call: {lead.Name}</h2>
           <p className="text-sm text-blue-600 font-mono">{lead.Phone}</p>
         </div>
-
-        <button
-          onClick={handleDropVM}
-          className="px-3 py-1 text-xs font-bold text-blue-700 border border-blue-300 rounded hover:bg-blue-100"
-        >
-          📼 Drop VM
-        </button>
       </div>
 
       <div className="p-6 space-y-4">
@@ -163,6 +203,9 @@ export default function InCall({ lead, onEndCall }) {
             value={subject}
             onChange={(e) => setSubject(e.target.value)}
           />
+          <p className="text-xs text-gray-500 mt-1">
+            Task links using <code>What_Id</code> + <code>$se_module=Leads</code>.
+          </p>
         </div>
 
         <div>
