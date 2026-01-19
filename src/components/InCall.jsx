@@ -1,4 +1,3 @@
-// FILE: src/components/InCall.jsx
 import React, { useMemo, useState } from "react";
 
 function getCrmApi() {
@@ -24,10 +23,7 @@ async function updateRecordCompat({ Entity, APIData }) {
 async function addNoteCompat({ RecordID, Title, Content }) {
   const api = getCrmApi();
   if (typeof api.addNotes === "function") return api.addNotes({ Entity: "Leads", RecordID, Title, Content });
-  return insertRecordCompat({
-    Entity: "Notes",
-    APIData: { Parent_Id: RecordID, Note_Title: Title, Note_Content: Content }
-  });
+  return insertRecordCompat({ Entity: "Notes", APIData: { Parent_Id: RecordID, Note_Title: Title, Note_Content: Content } });
 }
 
 function pad2(n) {
@@ -90,9 +86,7 @@ async function createCallForLead({ leadId, subject, startedAtIso, durationHHmm, 
 function isCallStillActive(upstreamBody, callid) {
   if (!callid) return false;
   if (!Array.isArray(upstreamBody)) return false;
-  return upstreamBody.some(
-    (c) => c && (c.orig_callid === callid || c.by_callid === callid || c.term_callid === callid)
-  );
+  return upstreamBody.some((c) => c && (c.orig_callid === callid || c.by_callid === callid || c.term_callid === callid));
 }
 
 async function ringlogixDisconnectAndWait({ session, activeCall }) {
@@ -101,9 +95,7 @@ async function ringlogixDisconnectAndWait({ session, activeCall }) {
   const callid = activeCall?.callid;
 
   if (!token || !uid || !callid) {
-    throw new Error(
-      `Missing disconnect inputs (token:${!!token}, uid:${!!uid}, callid:${!!callid}). Ensure /api/dial returns callid.`
-    );
+    throw new Error(`Missing disconnect inputs (token:${!!token}, uid:${!!uid}, callid:${!!callid}). Ensure /api/dial returns callid.`);
   }
 
   const discResp = await fetch("/api/hangup", {
@@ -122,8 +114,7 @@ async function ringlogixDisconnectAndWait({ session, activeCall }) {
   if (!discResp.ok) {
     const bodyText = JSON.stringify(discJson || {});
     const alreadyEndedHint =
-      discResp.status === 404 ||
-      /not\s*found|no\s*active\s*call|already\s*ended|invalid\s*call/i.test(bodyText);
+      discResp.status === 404 || /not\s*found|no\s*active\s*call|already\s*ended|invalid\s*call/i.test(bodyText);
 
     if (!alreadyEndedHint) {
       const msg = discJson?.message || discJson?.error || `Hangup failed (HTTP ${discResp.status})`;
@@ -141,11 +132,10 @@ async function ringlogixDisconnectAndWait({ session, activeCall }) {
       const r = await fetch(`/api/activeCalls?uid=${encodeURIComponent(uid)}`, {
         headers: { Authorization: `Bearer ${token}` }
       });
-
       const j = await r.json().catch(() => null);
       lastSnapshot = j;
-
       const upstreamBody = j?.upstreamBody;
+
       if (!Array.isArray(upstreamBody)) {
         const haystack = JSON.stringify(upstreamBody ?? j ?? {});
         const stillThereFallback = haystack.includes(callid);
@@ -162,31 +152,6 @@ async function ringlogixDisconnectAndWait({ session, activeCall }) {
 
   console.warn("Hangup wait timed out; proceeding anyway.", { callid, lastSnapshot });
   return { ok: true, disconnected: true, via: "timeout-fallback", lastSnapshot };
-}
-
-async function buildLeadDetailUrlWithMailerFlag(leadId) {
-  if (!window?.ZOHO?.CRM?.CONFIG?.getOrgInfo) return null;
-
-  // Attempt to derive correct regional CRM domain + org id
-  const orgInfo = await window.ZOHO.CRM.CONFIG.getOrgInfo().catch(() => null);
-
-  // org id can appear under different keys depending on SDK/version/tenant
-  const orgId =
-    orgInfo?.org_id ||
-    orgInfo?.zgid ||
-    orgInfo?.id ||
-    orgInfo?.organization_id ||
-    orgInfo?.organizationId ||
-    null;
-
-  // domain_name commonly represents the Zoho domain suffix (e.g., "zoho.com", "zoho.eu")
-  const domainName = orgInfo?.domain_name || orgInfo?.domainName || null;
-
-  if (!orgId) return null;
-
-  // Use the known Zoho record URL format, swapping the domain suffix when available :contentReference[oaicite:8]{index=8}
-  const host = domainName ? `https://crm.${domainName}` : "https://crm.zoho.com";
-  return `${host}/crm/org${orgId}/tab/Leads/${encodeURIComponent(leadId)}?amp_mailer=1`;
 }
 
 export default function InCall({ lead, session, activeCall, onEndCall }) {
@@ -210,50 +175,50 @@ export default function InCall({ lead, session, activeCall, onEndCall }) {
     []
   );
 
-  // UPDATED: Send Email now opens Zoho Lead detail page in a new tab with ?amp_mailer=1
-  // The Zoho Client Script (Leads Detail Page onLoad) will detect that flag and call openMailer().
-  async function handleSendEmail(e) {
-    try {
-      e?.preventDefault?.();
-      e?.stopPropagation?.();
-    } catch {
-      // ignore
-    }
+  function handleSendEmail(e) {
+    // 1. Prevent bubbling so widget doesn't close or navigate
+    e.preventDefault();
+    e.stopPropagation();
 
-    const leadId = lead?.id;
-    if (!leadId) {
-      alert("No Lead ID available.");
-      return;
-    }
-
-    // Best UX: open a new tab to the lead record with the amp_mailer flag
+    // 2. Try to construct the correct Zoho URL to trigger the Client Script
+    // We use document.referrer (the parent page) to grab the base URL (Region + Org)
+    // Example Referrer: https://crm.zoho.com/crm/org12345/tab/Leads/CustomViewID
+    let baseUrl = "";
+    
     try {
-      const url = await buildLeadDetailUrlWithMailerFlag(leadId);
-      if (url) {
-        window.open(url, "_blank", "noopener,noreferrer");
-        return;
+      const referrer = document.referrer || "";
+      // Regex captures everything up to ".../tab/Leads"
+      const match = referrer.match(/^(https:\/\/[^/]+\/crm\/([^/]+\/)?tab\/Leads)/i);
+      
+      if (match && match[1]) {
+        baseUrl = match[1];
       }
     } catch (err) {
-      console.warn("Failed to build lead URL; falling back to UI.Record.open:", err);
+      console.warn("Could not parse referrer for URL construction", err);
     }
 
-    // Fallback: open the lead record via widget SDK (may open in the same window depending on Zoho UX) :contentReference[oaicite:9]{index=9}
-    try {
-      if (window?.ZOHO?.CRM?.UI?.Record?.open) {
-        await window.ZOHO.CRM.UI.Record.open({ Entity: "Leads", RecordID: String(leadId) });
-        alert("Lead opened. Use the native Send Email button in Zoho to email/log/templates.");
+    if (!baseUrl) {
+        // Fallback: If we can't find the URL, warn the user we can't auto-open the composer
+        alert("Unable to detect Zoho URL to auto-launch mailer.\nPlease use the standard 'Send Email' button on the Lead record.");
+        
+        // Open standard record as backup (will not trigger script, but prevents dead end)
+        try {
+            window.ZOHO.CRM.UI.Record.open({ Entity: "Leads", RecordID: lead.id, Target: "_blank" });
+        } catch(e) {
+            console.error("Standard open failed", e);
+        }
         return;
-      }
-    } catch (err) {
-      console.warn("ZOHO.CRM.UI.Record.open failed:", err);
     }
 
-    alert("Unable to open the Lead detail page automatically. Please open the Lead and use Zoho's Send Email button.");
+    // 3. Construct URL with the query param your Client Script looks for
+    const targetUrl = `${baseUrl}/${lead.id}?amp_mailer=1`;
+
+    // 4. Open in new tab
+    window.open(targetUrl, "_blank", "noopener,noreferrer");
   }
 
   async function handleSaveAndEnd() {
     setIsSaving(true);
-
     try {
       setIsHangingUp(true);
       await ringlogixDisconnectAndWait({ session, activeCall });
@@ -274,23 +239,16 @@ export default function InCall({ lead, session, activeCall, onEndCall }) {
         const startedAtIso = activeCall?.startedAt || new Date().toISOString();
         const durationHHmm = msToHHmm(Date.now() - new Date(startedAtIso).getTime());
         const resultText = status || "Completed";
-        ops.push(
-          createCallForLead({
-            leadId: lead.id,
-            subject: subject.trim(),
-            startedAtIso,
-            durationHHmm,
-            resultText
-          })
-        );
+        ops.push(createCallForLead({ leadId: lead.id, subject: subject.trim(), startedAtIso, durationHHmm, resultText }));
       }
 
       if (note?.trim()) ops.push(addNoteCompat({ RecordID: lead.id, Title: "Dialer Note", Content: note.trim() }));
-      if (status && status !== lead.Status)
-        ops.push(updateRecordCompat({ Entity: "Leads", APIData: { id: lead.id, Lead_Status: status } }));
+
+      if (status && status !== lead.Status) ops.push(updateRecordCompat({ Entity: "Leads", APIData: { id: lead.id, Lead_Status: status } }));
 
       const results = await Promise.allSettled(ops);
       const failures = results.filter((r) => r.status === "rejected");
+
       if (failures.length) {
         console.error("Save failures:", failures);
         alert("Some items failed to save (likely Calls field requirements/picklists). Check console.");
@@ -313,9 +271,7 @@ export default function InCall({ lead, session, activeCall, onEndCall }) {
         {activeCall?.callid ? (
           <p className="text-xs text-gray-500 mt-1 font-mono">callid: {activeCall.callid}</p>
         ) : (
-          <p className="text-xs text-orange-600 mt-1">
-            Warning: no callid captured (hangup/wait may not work for this call)
-          </p>
+          <p className="text-xs text-orange-600 mt-1">Warning: no callid captured (hangup/wait may not work for this call)</p>
         )}
       </div>
 
@@ -345,16 +301,10 @@ export default function InCall({ lead, session, activeCall, onEndCall }) {
 
         <div>
           <label className="block text-xs font-bold text-gray-500 uppercase">Update Disposition</label>
-          <select
-            className="w-full p-2 mt-1 border rounded bg-white"
-            value={status}
-            onChange={(e) => setStatus(e.target.value)}
-          >
+          <select className="w-full p-2 mt-1 border rounded bg-white" value={status} onChange={(e) => setStatus(e.target.value)}>
             <option value="">-- Select Status --</option>
             {statusOptions.map((opt) => (
-              <option key={opt} value={opt}>
-                {opt}
-              </option>
+              <option key={opt} value={opt}>{opt}</option>
             ))}
           </select>
         </div>
@@ -369,10 +319,10 @@ export default function InCall({ lead, session, activeCall, onEndCall }) {
 
         <button
           type="button"
-          onClick={(e) => handleSendEmail(e)}
+          onClick={handleSendEmail}
           className="w-full py-3 text-white bg-blue-600 rounded hover:bg-blue-700 font-bold shadow"
         >
-          Send Email (Zoho Composer)
+          Send Email (Opens Zoho Tab)
         </button>
       </div>
     </div>
