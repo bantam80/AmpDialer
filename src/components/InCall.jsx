@@ -38,7 +38,9 @@ function msToHHmm(ms) {
 }
 
 async function createCallForLead({ leadId, subject, startedAtIso, durationHHmm, resultText }) {
+  // Try multiple payload structures to handle different Zoho Org customizations
   const payloads = [
+    // 1. Standard Modern (Outbound_Call_Status)
     {
       Subject: subject,
       Call_Type: "Outbound",
@@ -49,6 +51,7 @@ async function createCallForLead({ leadId, subject, startedAtIso, durationHHmm, 
       Outbound_Call_Status: "Completed",
       Call_Result: resultText
     },
+    // 2. Legacy/Alternative (Outgoing_Call_Status)
     {
       Subject: subject,
       Call_Type: "Outbound",
@@ -59,6 +62,18 @@ async function createCallForLead({ leadId, subject, startedAtIso, durationHHmm, 
       Outgoing_Call_Status: "Completed",
       Call_Result: resultText
     },
+    // 3. Generic (Call_Status)
+    {
+      Subject: subject,
+      Call_Type: "Outbound",
+      "$se_module": "Leads",
+      What_Id: leadId,
+      Call_Start_Time: startedAtIso,
+      Call_Duration: durationHHmm,
+      Call_Status: "Completed",
+      Call_Result: resultText
+    },
+    // 4. Minimal (No status/result - relies on defaults)
     {
       Subject: subject,
       Call_Type: "Outbound",
@@ -73,14 +88,18 @@ async function createCallForLead({ leadId, subject, startedAtIso, durationHHmm, 
   for (let i = 0; i < payloads.length; i++) {
     try {
       const resp = await insertRecordCompat({ Entity: "Calls", APIData: payloads[i] });
+      // Zoho API sometimes returns 200 but contains "status:error" in body
+      if (resp && resp.data && Array.isArray(resp.data) && resp.data[0].status === "error") {
+        throw new Error(JSON.stringify(resp.data[0]));
+      }
       console.log("Call insert OK (attempt " + (i + 1) + "):", resp);
       return resp;
     } catch (e) {
       lastErr = e;
-      console.warn("Call insert failed (attempt " + (i + 1) + "):", e);
+      console.warn(`Call insert attempt ${i + 1} failed:`, e);
     }
   }
-  throw lastErr || new Error("Call insert failed");
+  throw lastErr || new Error("Call insert failed after all attempts");
 }
 
 function isCallStillActive(upstreamBody, callid) {
@@ -176,18 +195,14 @@ export default function InCall({ lead, session, activeCall, onEndCall }) {
     []
   );
 
-  // Robustly determine the Lead URL on mount
   useEffect(() => {
     let baseUrl = "";
     try {
-        // Try to parse referrer to respect Org/Region (e.g. crm.zoho.eu / org123)
         const referrer = document.referrer || "";
         const match = referrer.match(/^(https:\/\/[^/]+\/crm\/([^/]+\/)?tab\/Leads)/i);
         if (match && match[1]) {
             baseUrl = match[1];
         } else {
-            // Fallback: Use standard .com URL if we can't detect environment
-            // This is safer than an empty link
             baseUrl = "https://crm.zoho.com/crm/tab/Leads";
         }
     } catch (e) {
@@ -199,9 +214,10 @@ export default function InCall({ lead, session, activeCall, onEndCall }) {
     }
   }, [lead]);
 
-
   async function handleSaveAndEnd() {
     setIsSaving(true);
+    
+    // 1. Hangup Process
     try {
       setIsHangingUp(true);
       await ringlogixDisconnectAndWait({ session, activeCall });
@@ -215,32 +231,79 @@ export default function InCall({ lead, session, activeCall, onEndCall }) {
       setIsHangingUp(false);
     }
 
+    // 2. Save Process
     try {
       const ops = [];
 
+      // Add Call Activity
       if (subject?.trim()) {
         const startedAtIso = activeCall?.startedAt || new Date().toISOString();
         const durationHHmm = msToHHmm(Date.now() - new Date(startedAtIso).getTime());
         const resultText = status || "Completed";
-        ops.push(createCallForLead({ leadId: lead.id, subject: subject.trim(), startedAtIso, durationHHmm, resultText }));
+        ops.push(
+          createCallForLead({ 
+            leadId: lead.id, 
+            subject: subject.trim(), 
+            startedAtIso, 
+            durationHHmm, 
+            resultText 
+          })
+          .then(res => ({ status: 'fulfilled', value: res, type: 'Call' }))
+          .catch(err => ({ status: 'rejected', reason: err, type: 'Call' }))
+        );
       }
 
-      if (note?.trim()) ops.push(addNoteCompat({ RecordID: lead.id, Title: "Dialer Note", Content: note.trim() }));
+      // Add Note
+      if (note?.trim()) {
+        ops.push(
+            addNoteCompat({ RecordID: lead.id, Title: "Dialer Note", Content: note.trim() })
+            .then(res => ({ status: 'fulfilled', value: res, type: 'Note' }))
+            .catch(err => ({ status: 'rejected', reason: err, type: 'Note' }))
+        );
+      }
 
-      if (status && status !== lead.Status) ops.push(updateRecordCompat({ Entity: "Leads", APIData: { id: lead.id, Lead_Status: status } }));
+      // Update Lead Status
+      if (status && status !== lead.Status) {
+        ops.push(
+            updateRecordCompat({ Entity: "Leads", APIData: { id: lead.id, Lead_Status: status } })
+            .then(res => ({ status: 'fulfilled', value: res, type: 'LeadStatus' }))
+            .catch(err => ({ status: 'rejected', reason: err, type: 'LeadStatus' }))
+        );
+      }
 
-      const results = await Promise.allSettled(ops);
+      // Await all operations
+      const results = await Promise.all(ops);
       const failures = results.filter((r) => r.status === "rejected");
 
-      if (failures.length) {
+      if (failures.length > 0) {
         console.error("Save failures:", failures);
-        alert("Some items failed to save (likely Calls field requirements/picklists). Check console.");
+        
+        // Extract readable error messages
+        const errorMessages = failures.map(f => {
+            const errObj = f.reason;
+            // Try to parse ZOHO API error format
+            let msg = errObj.message || JSON.stringify(errObj);
+            try {
+                // Handle JSON strings in error messages if present
+                if (typeof msg === 'string' && msg.includes('{')) {
+                    const parsed = JSON.parse(msg);
+                    if (parsed.message) msg = parsed.message;
+                    if (parsed.details) msg += ` (${JSON.stringify(parsed.details)})`;
+                }
+            } catch(e) {}
+            return `${f.type} failed: ${msg}`;
+        }).join("\n");
+
+        alert(`Data partially failed to save:\n${errorMessages}\n\nCheck browser console for full details.`);
+        
+        // If the Call failed, we usually don't want to advance, but if it's just a note, maybe we do.
+        // For now, we allow advancing but warn the user.
       }
 
       onEndCall();
     } catch (e) {
-      console.error("Error saving records:", e);
-      alert("Error saving data to Zoho. Check console.");
+      console.error("Critical error saving records:", e);
+      alert("Critical error saving data. Check console.");
     } finally {
       setIsSaving(false);
     }
@@ -300,17 +363,12 @@ export default function InCall({ lead, session, activeCall, onEndCall }) {
           {isSaving ? (isHangingUp ? "Hanging up..." : "Saving...") : "End Interaction & Next"}
         </button>
 
-        {/* Standard HTML Anchor used here. 
-            This bypasses JS execution stack focus stealing which causes standard buttons to close widgets.
-        */}
         <a
           href={leadUrl}
           target="_blank"
           rel="noopener noreferrer"
           className="block w-full py-3 text-center text-white bg-blue-600 rounded hover:bg-blue-700 font-bold shadow no-underline"
           onClick={(e) => {
-              // Only prevent bubbling to parent containers.
-              // Do NOT preventDefault, or the link won't open.
               e.stopPropagation();
           }}
         >
