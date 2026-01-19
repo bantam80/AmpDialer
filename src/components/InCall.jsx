@@ -37,8 +37,17 @@ function msToHHmm(ms) {
   return `${pad2(hours)}:${pad2(mins)}`;
 }
 
+// FIX: Helper to strip milliseconds from ISO string for strict Zoho validation
+function toZohoDateTime(isoString) {
+    if (!isoString) return new Date().toISOString().split('.')[0] + "Z";
+    // Takes "2023-10-25T10:00:00.123Z" and returns "2023-10-25T10:00:00Z"
+    return isoString.split('.')[0] + "Z";
+}
+
 async function createCallForLead({ leadId, subject, startedAtIso, durationHHmm, resultText }) {
-  // Try multiple payload structures to handle different Zoho Org customizations
+  // Ensure the date format is strictly YYYY-MM-DDTHH:mm:ssZ (no ms)
+  const safeStartTime = toZohoDateTime(startedAtIso);
+
   const payloads = [
     // 1. Standard Modern (Outbound_Call_Status)
     {
@@ -46,7 +55,7 @@ async function createCallForLead({ leadId, subject, startedAtIso, durationHHmm, 
       Call_Type: "Outbound",
       "$se_module": "Leads",
       What_Id: leadId,
-      Call_Start_Time: startedAtIso,
+      Call_Start_Time: safeStartTime,
       Call_Duration: durationHHmm,
       Outbound_Call_Status: "Completed",
       Call_Result: resultText
@@ -57,7 +66,7 @@ async function createCallForLead({ leadId, subject, startedAtIso, durationHHmm, 
       Call_Type: "Outbound",
       "$se_module": "Leads",
       What_Id: leadId,
-      Call_Start_Time: startedAtIso,
+      Call_Start_Time: safeStartTime,
       Call_Duration: durationHHmm,
       Outgoing_Call_Status: "Completed",
       Call_Result: resultText
@@ -68,7 +77,7 @@ async function createCallForLead({ leadId, subject, startedAtIso, durationHHmm, 
       Call_Type: "Outbound",
       "$se_module": "Leads",
       What_Id: leadId,
-      Call_Start_Time: startedAtIso,
+      Call_Start_Time: safeStartTime,
       Call_Duration: durationHHmm,
       Call_Status: "Completed",
       Call_Result: resultText
@@ -79,7 +88,7 @@ async function createCallForLead({ leadId, subject, startedAtIso, durationHHmm, 
       Call_Type: "Outbound",
       "$se_module": "Leads",
       What_Id: leadId,
-      Call_Start_Time: startedAtIso,
+      Call_Start_Time: safeStartTime,
       Call_Duration: durationHHmm
     }
   ];
