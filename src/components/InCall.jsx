@@ -2,7 +2,7 @@ import React, { useMemo, useState } from 'react';
 
 function getCrmApi() {
   const api = window?.ZOHO?.CRM?.API;
-  if (!api) throw new Error('ZOHO.CRM.API not available (Zoho not initialized or wrong context).');
+  if (!api) throw new Error('ZOHO.CRM.API not available');
   return api;
 }
 
@@ -18,22 +18,19 @@ async function insertRecordCompat({ Entity, APIData }) {
     return api.createRecord({ Entity, APIData });
   }
 
-  console.error('Available API methods:', Object.keys(api));
+  console.error('Available ZOHO.CRM.API methods:', Object.keys(api));
   throw new Error('No supported record-create method found (expected insertRecord).');
 }
 
 async function updateRecordCompat({ Entity, APIData }) {
   const api = getCrmApi();
   if (typeof api.updateRecord === 'function') return api.updateRecord({ Entity, APIData });
-
-  console.error('Available API methods:', Object.keys(api));
-  throw new Error('updateRecord is not available in this SDK build.');
+  throw new Error('updateRecord not available');
 }
 
 async function addNoteCompat({ Entity, RecordID, Title, Content }) {
   const api = getCrmApi();
 
-  // Preferred method in many widget SDK builds
   if (typeof api.addNotes === 'function') {
     return api.addNotes({ Entity, RecordID, Title, Content });
   }
@@ -49,8 +46,11 @@ async function addNoteCompat({ Entity, RecordID, Title, Content }) {
   });
 }
 
-// ---- Task creation that works with Leads ----
-// Key change: link using What_Id + $se_module="Leads" (common requirement). :contentReference[oaicite:1]{index=1}
+/**
+ * Task create for a Lead:
+ * IMPORTANT: Do NOT send Who_Id (Zoho rejects it in your org for Leads).
+ * Use What_Id + $se_module="Leads" instead.
+ */
 async function createTaskForLead({ leadId, subject }) {
   const today = new Date();
   const yyyy = today.getFullYear();
@@ -58,8 +58,8 @@ async function createTaskForLead({ leadId, subject }) {
   const dd = String(today.getDate()).padStart(2, '0');
   const dueDate = `${yyyy}-${mm}-${dd}`;
 
-  // We’ll try a few variants because each Zoho org can have different picklist values for Status/Priority.
-  const attempts = [
+  // No Who_Id anywhere. Only What_Id + $se_module.
+  const payloads = [
     {
       Subject: subject,
       '$se_module': 'Leads',
@@ -86,24 +86,22 @@ async function createTaskForLead({ leadId, subject }) {
 
   let lastErr = null;
 
-  for (let i = 0; i < attempts.length; i++) {
+  for (let i = 0; i < payloads.length; i++) {
     try {
       const resp = await insertRecordCompat({
         Entity: 'Tasks',
-        APIData: attempts[i]
+        APIData: payloads[i]
       });
 
-      // Many Zoho APIs return {data:[{code, message, status, details...}]}
-      // We won’t over-parse; just log it for visibility.
-      console.log('Task insert response (attempt ' + (i + 1) + '):', resp);
-      return { ok: true, resp };
+      console.log('Task insert OK (attempt ' + (i + 1) + '):', resp);
+      return resp;
     } catch (e) {
       lastErr = e;
       console.warn('Task insert failed (attempt ' + (i + 1) + '):', e);
     }
   }
 
-  return { ok: false, error: lastErr };
+  throw lastErr || new Error('Task insert failed');
 }
 
 export default function InCall({ lead, onEndCall }) {
@@ -132,18 +130,12 @@ export default function InCall({ lead, onEndCall }) {
     try {
       const ops = [];
 
-      // 1) Task (robust + retries)
+      // 1) Create Task (linked to Lead using What_Id + $se_module)
       if (subject?.trim()) {
-        ops.push(
-          (async () => {
-            const r = await createTaskForLead({ leadId: lead.id, subject: subject.trim() });
-            if (!r.ok) throw r.error;
-            return r;
-          })()
-        );
+        ops.push(createTaskForLead({ leadId: lead.id, subject: subject.trim() }));
       }
 
-      // 2) Note
+      // 2) Add Note
       if (note?.trim()) {
         ops.push(
           addNoteCompat({
@@ -155,7 +147,7 @@ export default function InCall({ lead, onEndCall }) {
         );
       }
 
-      // 3) Lead Status
+      // 3) Update Lead status
       if (status && status !== lead.Status) {
         ops.push(
           updateRecordCompat({
@@ -170,10 +162,7 @@ export default function InCall({ lead, onEndCall }) {
 
       if (failures.length) {
         console.error('Save failures:', failures);
-
-        // Helpful debug: show the FIRST failure clearly
-        const first = failures[0];
-        alert('Some items failed to save (likely Task). Notes/Status may still be saved. Check console.');
+        alert('Some items failed to save (likely Task field requirements). Check console.');
       }
 
       onEndCall();
@@ -187,11 +176,9 @@ export default function InCall({ lead, onEndCall }) {
 
   return (
     <div className="max-w-lg mx-auto mt-4 bg-white rounded-lg shadow-xl border-t-4 border-blue-500">
-      <div className="p-4 bg-blue-50 flex justify-between items-center border-b">
-        <div>
-          <h2 className="text-lg font-bold text-gray-800">In Call: {lead.Name}</h2>
-          <p className="text-sm text-blue-600 font-mono">{lead.Phone}</p>
-        </div>
+      <div className="p-4 bg-blue-50 border-b">
+        <h2 className="text-lg font-bold text-gray-800">In Call: {lead?.Name}</h2>
+        <p className="text-sm text-blue-600 font-mono">{lead?.Phone}</p>
       </div>
 
       <div className="p-6 space-y-4">
@@ -204,7 +191,7 @@ export default function InCall({ lead, onEndCall }) {
             onChange={(e) => setSubject(e.target.value)}
           />
           <p className="text-xs text-gray-500 mt-1">
-            Task links using <code>What_Id</code> + <code>$se_module=Leads</code>.
+            Task links via <code>What_Id</code> + <code>$se_module=Leads</code> (no <code>Who_Id</code>).
           </p>
         </div>
 
@@ -212,9 +199,9 @@ export default function InCall({ lead, onEndCall }) {
           <label className="block text-xs font-bold text-gray-500 uppercase">Add Note</label>
           <textarea
             className="w-full p-2 mt-1 border rounded h-24"
-            placeholder="Type notes here..."
             value={note}
             onChange={(e) => setNote(e.target.value)}
+            placeholder="Type notes here..."
           />
         </div>
 
