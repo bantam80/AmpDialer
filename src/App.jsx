@@ -7,25 +7,28 @@ import Disposition from './components/Disposition';
 
 export default function App() {
   const [session, setSession] = useState(null);
-
   // States: IDLE, READY, CALLING, INCALL, DISPOSITION
   const [appState, setAppState] = useState('IDLE');
 
   // Zoho readiness + current list view (CVID)
+  const [hasZoho, setHasZoho] = useState(false);
   const [zohoReady, setZohoReady] = useState(false);
   const [detectedCvid, setDetectedCvid] = useState(null);
 
   useEffect(() => {
-    const hasZoho =
+    const ok =
       typeof window !== 'undefined' &&
       window.ZOHO &&
       window.ZOHO.embeddedApp &&
       typeof window.ZOHO.embeddedApp.init === 'function';
 
-    if (!hasZoho) {
+    if (!ok) {
       console.warn('ZOHO SDK not available (standalone mode).');
+      setHasZoho(false);
       return;
     }
+
+    setHasZoho(true);
 
     // Capture list-view context (including cvid)
     window.ZOHO.embeddedApp.on('PageLoad', function (data) {
@@ -53,7 +56,7 @@ export default function App() {
     isQueueFinished
   } = useZohoQueue({ zohoReady, initialCvid: detectedCvid });
 
-  // ---- Dial Logic (uses your /api/dial envelope: { ok, upstreamStatus, ... }) ----
+  // ---- Dial Logic (robust to different /api/dial response shapes) ----
   const handleDial = async () => {
     if (!session?.access_token) {
       setSession(null);
@@ -61,7 +64,6 @@ export default function App() {
       return;
     }
     if (!currentLead?.Phone) {
-      // no phone -> auto junk
       await handleAutoJunk('Missing Phone');
       return;
     }
@@ -82,22 +84,35 @@ export default function App() {
         })
       });
 
-      const data = await resp.json().catch(() => ({}));
+      // Some versions return empty body on success; don’t crash on json()
+      let data = null;
+      try {
+        data = await resp.json();
+      } catch {
+        data = null;
+      }
 
-      if (data?.ok === true) {
-        // Successful Dial -> Go to InCall
+      const upstreamStatus = data?.upstreamStatus ?? resp.status;
+
+      // Success if upstream accepted OR your proxy returned ok:true
+      const success =
+        upstreamStatus === 202 ||
+        data?.ok === true ||
+        (resp.status === 202) ||
+        (resp.status === 200 && (data === null || Object.keys(data || {}).length === 0));
+
+      if (success) {
         setAppState('INCALL');
         return;
       }
 
-      // Failure cases (Ringlogix can return empty body; rely on status)
-      const upstreamStatus = data?.upstreamStatus ?? resp.status;
-
+      // Invalid number types
       if (upstreamStatus === 400 || upstreamStatus === 404) {
         await handleAutoJunk('Invalid Number');
         return;
       }
 
+      // Auth/session expired
       if (upstreamStatus === 401 || upstreamStatus === 403) {
         setSession(null);
         setAppState('IDLE');
@@ -116,8 +131,8 @@ export default function App() {
   // ---- Auto-Junk (Skip Logic) ----
   const handleAutoJunk = async (reason) => {
     try {
-      if (!zohoReady || !window.ZOHO?.CRM?.API) {
-        console.warn('Zoho CRM API not ready; cannot auto-junk. Skipping lead in UI only.');
+      if (!zohoReady || !window.ZOHO?.CRM?.API?.updateRecord || !window.ZOHO?.CRM?.API?.createRecord) {
+        console.warn('Zoho CRM API not ready; cannot auto-junk. Skipping in UI only.');
         await nextLead();
         setAppState('READY');
         return;
@@ -141,7 +156,6 @@ export default function App() {
       setAppState('READY');
     } catch (e) {
       console.error('Auto-junk failed:', e);
-      // Still move on so dialer doesn’t get stuck
       await nextLead();
       setAppState('READY');
     }
@@ -153,7 +167,7 @@ export default function App() {
     setAppState('READY');
   };
 
-  // ---- Render Router ----
+  // RENDER ROUTER
   if (!session) {
     return (
       <Login
@@ -165,17 +179,13 @@ export default function App() {
     );
   }
 
-  if (!zohoReady) {
+  // If we're inside Zoho, wait for init before using Zoho APIs
+  if (hasZoho && !zohoReady) {
     return <div className="p-10 text-center text-gray-500">Initializing Zoho...</div>;
   }
 
-  if (loading) {
-    return <div className="p-10 text-center text-gray-500">Loading Queue...</div>;
-  }
-
-  if (isQueueFinished) {
-    return <div className="p-10 text-center text-green-600 font-bold">Queue Completed!</div>;
-  }
+  if (loading) return <div className="p-10 text-center text-gray-500">Loading Queue...</div>;
+  if (isQueueFinished) return <div className="p-10 text-center text-green-600 font-bold">Queue Completed!</div>;
 
   return (
     <div className="min-h-screen bg-gray-100 p-4">
@@ -203,9 +213,7 @@ export default function App() {
       {appState === 'READY' && <Dialer lead={currentLead} onDial={handleDial} />}
 
       {appState === 'CALLING' && (
-        <div className="text-center mt-20 animate-pulse font-bold text-xl">
-          Dialing {currentLead.Phone}...
-        </div>
+        <div className="text-center mt-20 animate-pulse font-bold text-xl">Dialing {currentLead.Phone}...</div>
       )}
 
       {appState === 'INCALL' && <InCall lead={currentLead} onEndCall={handleEndCall} />}
@@ -214,7 +222,7 @@ export default function App() {
         <Disposition
           lead={currentLead}
           onSave={async (status) => {
-            if (zohoReady && window.ZOHO?.CRM?.API) {
+            if (zohoReady && window.ZOHO?.CRM?.API?.updateRecord) {
               await window.ZOHO.CRM.API.updateRecord({
                 Entity: 'Leads',
                 APIData: { id: currentLead.id, Lead_Status: status }
