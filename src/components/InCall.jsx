@@ -223,6 +223,21 @@ export default function InCall({ lead, session, activeCall, onEndCall }) {
     }
   }, [lead]);
 
+  function handleOpenLead(e) {
+    e.preventDefault();
+    e.stopPropagation();
+
+    // Features string forces a new window/popup instead of a new tab
+    const features = "width=1100,height=900,resizable=yes,scrollbars=yes,status=no,toolbar=no";
+    
+    // Attempt open
+    const win = window.open(leadUrl, "_blank", features);
+
+    if (!win) {
+        alert("Pop-up blocked. Please allow pop-ups for this site to open the Lead record.");
+    }
+  }
+
   async function handleSaveAndEnd() {
     setIsSaving(true);
     
@@ -293,7 +308,6 @@ export default function InCall({ lead, session, activeCall, onEndCall }) {
             // Try to parse ZOHO API error format
             let msg = errObj.message || JSON.stringify(errObj);
             try {
-                // Handle JSON strings in error messages if present
                 if (typeof msg === 'string' && msg.includes('{')) {
                     const parsed = JSON.parse(msg);
                     if (parsed.message) msg = parsed.message;
@@ -304,9 +318,6 @@ export default function InCall({ lead, session, activeCall, onEndCall }) {
         }).join("\n");
 
         alert(`Data partially failed to save:\n${errorMessages}\n\nCheck browser console for full details.`);
-        
-        // If the Call failed, we usually don't want to advance, but if it's just a note, maybe we do.
-        // For now, we allow advancing but warn the user.
       }
 
       onEndCall();
@@ -372,17 +383,13 @@ export default function InCall({ lead, session, activeCall, onEndCall }) {
           {isSaving ? (isHangingUp ? "Hanging up..." : "Saving...") : "End Interaction & Next"}
         </button>
 
-        <a
-          href={leadUrl}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="block w-full py-3 text-center text-white bg-blue-600 rounded hover:bg-blue-700 font-bold shadow no-underline"
-          onClick={(e) => {
-              e.stopPropagation();
-          }}
+        <button
+          type="button"
+          onClick={handleOpenLead}
+          className="w-full py-3 text-white bg-blue-600 rounded hover:bg-blue-700 font-bold shadow"
         >
-          Open Lead Record
-        </a>
+          Open Lead Record (Window)
+        </button>
       </div>
     </div>
   );
