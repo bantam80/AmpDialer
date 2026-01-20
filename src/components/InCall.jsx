@@ -37,19 +37,42 @@ function msToHHmm(ms) {
   return `${pad2(hours)}:${pad2(mins)}`;
 }
 
-// FIX: Helper to strip milliseconds from ISO string for strict Zoho validation
+// Helper to strip milliseconds from ISO string for strict Zoho validation
 function toZohoDateTime(isoString) {
     if (!isoString) return new Date().toISOString().split('.')[0] + "Z";
-    // Takes "2023-10-25T10:00:00.123Z" and returns "2023-10-25T10:00:00Z"
     return isoString.split('.')[0] + "Z";
 }
 
-async function createCallForLead({ leadId, subject, startedAtIso, durationHHmm, resultText }) {
-  // Ensure the date format is strictly YYYY-MM-DDTHH:mm:ssZ (no ms)
-  const safeStartTime = toZohoDateTime(startedAtIso);
+// Calculates future start time based on selected date + current time rounded to nearest 30m
+function calculateScheduledTime(dateString) {
+    if (!dateString) return null;
+    
+    const now = new Date();
+    // Round minutes to 0 or 30
+    let minutes = now.getMinutes();
+    let addHours = 0;
+    
+    if (minutes < 15) {
+        minutes = 0;
+    } else if (minutes < 45) {
+        minutes = 30;
+    } else {
+        minutes = 0;
+        addHours = 1;
+    }
+    
+    // Create base date from the picker (YYYY-MM-DD)
+    // Note: Appending 'T00:00:00' ensures local time parsing in most browsers, 
+    // but constructing explicitly is safer to mix with current Hours/Mins.
+    const [y, m, d] = dateString.split('-').map(Number);
+    const target = new Date(y, m - 1, d, now.getHours() + addHours, minutes, 0);
 
+    return toZohoDateTime(target.toISOString());
+}
+
+async function createCallForLead({ leadId, subject, startedAtIso, durationHHmm, resultText }) {
+  const safeStartTime = toZohoDateTime(startedAtIso);
   const payloads = [
-    // 1. Standard Modern (Outbound_Call_Status)
     {
       Subject: subject,
       Call_Type: "Outbound",
@@ -60,7 +83,6 @@ async function createCallForLead({ leadId, subject, startedAtIso, durationHHmm, 
       Outbound_Call_Status: "Completed",
       Call_Result: resultText
     },
-    // 2. Legacy/Alternative (Outgoing_Call_Status)
     {
       Subject: subject,
       Call_Type: "Outbound",
@@ -71,7 +93,6 @@ async function createCallForLead({ leadId, subject, startedAtIso, durationHHmm, 
       Outgoing_Call_Status: "Completed",
       Call_Result: resultText
     },
-    // 3. Generic (Call_Status)
     {
       Subject: subject,
       Call_Type: "Outbound",
@@ -82,7 +103,6 @@ async function createCallForLead({ leadId, subject, startedAtIso, durationHHmm, 
       Call_Status: "Completed",
       Call_Result: resultText
     },
-    // 4. Minimal (No status/result - relies on defaults)
     {
       Subject: subject,
       Call_Type: "Outbound",
@@ -97,7 +117,6 @@ async function createCallForLead({ leadId, subject, startedAtIso, durationHHmm, 
   for (let i = 0; i < payloads.length; i++) {
     try {
       const resp = await insertRecordCompat({ Entity: "Calls", APIData: payloads[i] });
-      // Zoho API sometimes returns 200 but contains "status:error" in body
       if (resp && resp.data && Array.isArray(resp.data) && resp.data[0].status === "error") {
         throw new Error(JSON.stringify(resp.data[0]));
       }
@@ -110,6 +129,37 @@ async function createCallForLead({ leadId, subject, startedAtIso, durationHHmm, 
   }
   throw lastErr || new Error("Call insert failed after all attempts");
 }
+
+async function createScheduledCall({ leadId, startTime, agenda }) {
+    const payload = {
+        Subject: "Follow Up Call",
+        Call_Type: "Outbound",
+        "$se_module": "Leads",
+        What_Id: leadId,
+        Call_Start_Time: startTime,
+        Call_Purpose: "Prospecting", // v1.1.3 Requirement
+        Agenda: agenda || "",        // v1.1.3 Requirement
+        Call_Status: "Scheduled",    // Standard for future calls
+        Send_Notification: false
+    };
+
+    // Try Standard insert first
+    try {
+        const resp = await insertRecordCompat({ Entity: "Calls", APIData: payload });
+        if (resp && resp.data && Array.isArray(resp.data) && resp.data[0].status === "error") {
+             // If "Agenda" fails (some layouts use Description), fallback
+             console.warn("Scheduled Call insert failed on Agenda, retrying with Description...", resp.data[0]);
+             const fallbackPayload = { ...payload };
+             delete fallbackPayload.Agenda;
+             fallbackPayload.Description = agenda || "";
+             return await insertRecordCompat({ Entity: "Calls", APIData: fallbackPayload });
+        }
+        return resp;
+    } catch (e) {
+        throw e;
+    }
+}
+
 
 function isCallStillActive(upstreamBody, callid) {
   if (!callid) return false;
@@ -189,6 +239,9 @@ export default function InCall({ lead, session, activeCall, onEndCall }) {
   const [isSaving, setIsSaving] = useState(false);
   const [isHangingUp, setIsHangingUp] = useState(false);
   const [leadUrl, setLeadUrl] = useState("#");
+  
+  // v1.1.3: Follow Up Date State
+  const [followUpDate, setFollowUpDate] = useState("");
 
   const statusOptions = useMemo(
     () => [
@@ -226,19 +279,20 @@ export default function InCall({ lead, session, activeCall, onEndCall }) {
   function handleOpenLead(e) {
     e.preventDefault();
     e.stopPropagation();
-
-    // Features string forces a new window/popup instead of a new tab
     const features = "width=1100,height=900,resizable=yes,scrollbars=yes,status=no,toolbar=no";
-    
-    // Attempt open
     const win = window.open(leadUrl, "_blank", features);
-
     if (!win) {
         alert("Pop-up blocked. Please allow pop-ups for this site to open the Lead record.");
     }
   }
 
   async function handleSaveAndEnd() {
+    // Validation: If Contact in Future, Date is required
+    if (status === "Contact in Future" && !followUpDate) {
+        alert("Please select a Follow Up Date.");
+        return;
+    }
+
     setIsSaving(true);
     
     // 1. Hangup Process
@@ -259,7 +313,7 @@ export default function InCall({ lead, session, activeCall, onEndCall }) {
     try {
       const ops = [];
 
-      // Add Call Activity
+      // A. Standard Call Log (Past Activity)
       if (subject?.trim()) {
         const startedAtIso = activeCall?.startedAt || new Date().toISOString();
         const durationHHmm = msToHHmm(Date.now() - new Date(startedAtIso).getTime());
@@ -272,12 +326,12 @@ export default function InCall({ lead, session, activeCall, onEndCall }) {
             durationHHmm, 
             resultText 
           })
-          .then(res => ({ status: 'fulfilled', value: res, type: 'Call' }))
-          .catch(err => ({ status: 'rejected', reason: err, type: 'Call' }))
+          .then(res => ({ status: 'fulfilled', value: res, type: 'Log Call' }))
+          .catch(err => ({ status: 'rejected', reason: err, type: 'Log Call' }))
         );
       }
 
-      // Add Note
+      // B. Note
       if (note?.trim()) {
         ops.push(
             addNoteCompat({ RecordID: lead.id, Title: "Dialer Note", Content: note.trim() })
@@ -286,26 +340,49 @@ export default function InCall({ lead, session, activeCall, onEndCall }) {
         );
       }
 
-      // Update Lead Status
+      // C. Lead Field Updates
+      // v1.1.3: If Contact in Future, update Follow_Up_Date and Campaign
+      const leadUpdateData = { id: lead.id };
+      let hasUpdate = false;
+
       if (status && status !== lead.Status) {
+        leadUpdateData.Lead_Status = status;
+        hasUpdate = true;
+      }
+
+      if (status === "Contact in Future") {
+          leadUpdateData.Follow_Up_Date = followUpDate;       // v1.1.3 Requirement
+          leadUpdateData.Campaign = "VoiceOS Follow Up List"; // v1.1.3 Requirement
+          hasUpdate = true;
+      }
+
+      if (hasUpdate) {
         ops.push(
-            updateRecordCompat({ Entity: "Leads", APIData: { id: lead.id, Lead_Status: status } })
-            .then(res => ({ status: 'fulfilled', value: res, type: 'LeadStatus' }))
-            .catch(err => ({ status: 'rejected', reason: err, type: 'LeadStatus' }))
+            updateRecordCompat({ Entity: "Leads", APIData: leadUpdateData })
+            .then(res => ({ status: 'fulfilled', value: res, type: 'Lead Update' }))
+            .catch(err => ({ status: 'rejected', reason: err, type: 'Lead Update' }))
         );
       }
 
-      // Await all operations
+      // D. Schedule Future Call (v1.1.3)
+      if (status === "Contact in Future") {
+          const scheduledTime = calculateScheduledTime(followUpDate);
+          ops.push(
+              createScheduledCall({ leadId: lead.id, startTime: scheduledTime, agenda: note })
+              .then(res => ({ status: 'fulfilled', value: res, type: 'Schedule Call' }))
+              .catch(err => ({ status: 'rejected', reason: err, type: 'Schedule Call' }))
+          );
+      }
+
+      // Execute all operations
       const results = await Promise.all(ops);
       const failures = results.filter((r) => r.status === "rejected");
 
       if (failures.length > 0) {
         console.error("Save failures:", failures);
         
-        // Extract readable error messages
         const errorMessages = failures.map(f => {
             const errObj = f.reason;
-            // Try to parse ZOHO API error format
             let msg = errObj.message || JSON.stringify(errObj);
             try {
                 if (typeof msg === 'string' && msg.includes('{')) {
@@ -374,6 +451,25 @@ export default function InCall({ lead, session, activeCall, onEndCall }) {
             ))}
           </select>
         </div>
+
+        {/* v1.1.3: Date Picker triggers only on specific disposition */}
+        {status === "Contact in Future" && (
+            <div className="p-3 bg-yellow-50 border border-yellow-200 rounded animate-fade-in">
+                <label className="block text-xs font-bold text-yellow-700 uppercase mb-1">
+                    Select Follow Up Date *
+                </label>
+                <input 
+                    type="date"
+                    className="w-full p-2 border rounded border-yellow-400"
+                    value={followUpDate}
+                    onChange={(e) => setFollowUpDate(e.target.value)}
+                    min={new Date().toISOString().split('T')[0]} // Disable past dates
+                />
+                <p className="text-xs text-yellow-600 mt-1">
+                    This will schedule a call for this date (at current time rounded to nearest 30m) and update the lead's Campaign.
+                </p>
+            </div>
+        )}
 
         <button
           onClick={handleSaveAndEnd}
