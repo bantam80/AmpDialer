@@ -62,8 +62,6 @@ function calculateScheduledTime(dateString) {
     }
     
     // Create base date from the picker (YYYY-MM-DD)
-    // Note: Appending 'T00:00:00' ensures local time parsing in most browsers, 
-    // but constructing explicitly is safer to mix with current Hours/Mins.
     const [y, m, d] = dateString.split('-').map(Number);
     const target = new Date(y, m - 1, d, now.getHours() + addHours, minutes, 0);
 
@@ -341,7 +339,6 @@ export default function InCall({ lead, session, activeCall, onEndCall }) {
       }
 
       // C. Lead Field Updates
-      // v1.1.3: If Contact in Future, update Follow_Up_Date and Campaign
       const leadUpdateData = { id: lead.id };
       let hasUpdate = false;
 
@@ -352,7 +349,7 @@ export default function InCall({ lead, session, activeCall, onEndCall }) {
 
       if (status === "Contact in Future") {
           leadUpdateData.Follow_Up_Date = followUpDate;       // v1.1.3 Requirement
-          leadUpdateData.Campaign = "VoiceOS Follow Up List"; // v1.1.3 Requirement
+          // Campaign Assignment removed (handled by Workflow Rules)
           hasUpdate = true;
       }
 
@@ -466,7 +463,7 @@ export default function InCall({ lead, session, activeCall, onEndCall }) {
                     min={new Date().toISOString().split('T')[0]} // Disable past dates
                 />
                 <p className="text-xs text-yellow-600 mt-1">
-                    This will schedule a call for this date (at current time rounded to nearest 30m) and update the lead's Campaign.
+                    This will schedule a call for this date (at current time rounded to nearest 30m) and update the lead's Follow Up Date.
                 </p>
             </div>
         )}
