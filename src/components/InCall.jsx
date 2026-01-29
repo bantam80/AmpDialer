@@ -139,9 +139,9 @@ export default function InCall({ lead, session, activeCall, onEndCall }) {
           target="_blank" 
           rel="noopener noreferrer"
           onClick={(e) => e.stopPropagation()}
-          className="bg-white border px-3 py-1 rounded text-xs font-bold text-gray-700 hover:bg-gray-100 shadow-sm"
+          className="bg-green-600 text-white px-4 py-2 rounded text-xs font-bold shadow hover:bg-green-700 transition-colors"
         >
-          Open Lead
+          OPEN LEAD
         </a>
       </div>
       <div className="p-6 space-y-4">
@@ -168,7 +168,7 @@ export default function InCall({ lead, session, activeCall, onEndCall }) {
         <button 
           onClick={handleSaveAndEnd} 
           disabled={isSaving} 
-          className="w-full py-3 mt-4 text-white bg-red-600 rounded hover:bg-red-700 font-bold shadow disabled:opacity-50"
+          className="w-full py-3 mt-4 text-white bg-red-600 rounded hover:bg-red-700 font-bold shadow disabled:opacity-50 transition-colors"
         >
           {isSaving ? "Processing..." : "End Interaction & Next"}
         </button>
