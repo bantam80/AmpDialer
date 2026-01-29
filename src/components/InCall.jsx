@@ -130,16 +130,19 @@ export default function InCall({ lead, session, activeCall, onEndCall }) {
   return (
     <div className="max-w-lg mx-auto mt-4 bg-white rounded-lg shadow-xl border-t-4 border-blue-500">
       <div className="p-4 bg-blue-50 border-b flex justify-between items-center">
-        <div>
-          <h2 className="text-lg font-bold text-gray-800">In Call: {lead?.Name}</h2>
-          <p className="text-sm text-blue-600 font-mono">{lead?.Phone}</p>
+        <div className="flex flex-col">
+          <h2 className="text-lg font-bold text-gray-800">In Call: {lead?.Name || "Unknown"}</h2>
+          <span className="text-xs text-blue-600 font-mono">{lead?.Phone || "No Phone"}</span>
         </div>
         <a 
-          href={`https://crm.zoho.com/crm/tab/Leads/${lead?.id}`} 
+          href={lead?.id ? `https://crm.zoho.com/crm/tab/Leads/${lead.id}` : "#"} 
           target="_blank" 
           rel="noopener noreferrer"
-          onClick={(e) => e.stopPropagation()}
-          className="bg-green-600 text-white px-4 py-2 rounded text-xs font-bold shadow hover:bg-green-700 transition-colors"
+          className="bg-green-600 text-white px-4 py-2 rounded text-xs font-bold shadow hover:bg-green-700 transition-all flex items-center justify-center min-w-[100px]"
+          onClick={(e) => {
+            if (!lead?.id) e.preventDefault();
+            e.stopPropagation();
+          }}
         >
           OPEN LEAD
         </a>
